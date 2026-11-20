@@ -28,6 +28,8 @@ export default function DataSiswaPage() {
   const [nama, setNama] = useState('');
   const [kelas, setKelas] = useState('');
   const [jurusan, setJurusan] = useState('TKJ');
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountPassword, setAccountPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -80,6 +82,8 @@ export default function DataSiswaPage() {
     setNama('');
     setKelas('');
     setJurusan('TKJ');
+    setAccountEmail('');
+    setAccountPassword('');
     setFormError('');
     setModalOpen(true);
   }
@@ -90,6 +94,8 @@ export default function DataSiswaPage() {
     setNama(student.nama);
     setKelas(student.kelas);
     setJurusan(student.jurusan || 'TKJ');
+    setAccountEmail(student.account_email || '');
+    setAccountPassword('');
     setFormError('');
     setModalOpen(true);
   }
@@ -99,15 +105,23 @@ export default function DataSiswaPage() {
     setSaving(true);
     setFormError('');
     try {
+      const payload = {
+        nis,
+        nama,
+        kelas,
+        jurusan,
+        account_email: accountEmail,
+        account_password: accountPassword,
+      };
       if (editingStudent) {
         await apiRequest(`/api/students/${editingStudent.id}`, {
           method: 'PATCH',
-          body: JSON.stringify({ nis, nama, kelas, jurusan }),
+          body: JSON.stringify(payload),
         });
       } else {
         await apiRequest('/api/students', {
           method: 'POST',
-          body: JSON.stringify({ nis, nama, kelas, jurusan }),
+          body: JSON.stringify(payload),
         });
       }
       setModalOpen(false);
@@ -140,7 +154,7 @@ export default function DataSiswaPage() {
           <div>
             <h2 className="text-lg font-bold text-slate-950">Master Data Siswa</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Kelola NIS, Nama, Kelas, dan Jurusan siswa untuk digunakan guru pada menu Absensi Siswa.
+              Kelola NIS, Nama, Kelas, Jurusan, serta akun login siswa agar siswa dapat masuk ke portal absensi.
             </p>
           </div>
           <button
@@ -209,7 +223,7 @@ export default function DataSiswaPage() {
           <div className="p-10 text-center">
             <p className="text-base font-bold text-slate-900">Belum Ada Data Siswa</p>
             <p className="mt-1 text-sm text-slate-600">
-              Tambahkan siswa pertama agar guru dapat memulai absensi siswa per kelas.
+              Tambahkan siswa pertama agar guru dapat memulai absensi siswa dan siswa dapat melakukan login.
             </p>
             <button
               type="button"
@@ -233,6 +247,7 @@ export default function DataSiswaPage() {
                   <th className="px-5 py-3">Nama Lengkap</th>
                   <th className="px-5 py-3">Kelas</th>
                   <th className="px-5 py-3">Jurusan</th>
+                  <th className="px-5 py-3">Akun Login</th>
                   <th className="px-5 py-3 text-right">Aksi</th>
                 </tr>
               </thead>
@@ -246,6 +261,15 @@ export default function DataSiswaPage() {
                     <td className="px-5 py-3 text-slate-700 whitespace-nowrap">{student.kelas}</td>
                     <td className="px-5 py-3 font-mono text-xs font-semibold text-red-700">
                       {student.jurusan}
+                    </td>
+                    <td className="px-5 py-3 text-xs">
+                      {student.user_id ? (
+                        <span className="font-medium text-emerald-700">
+                          Aktif · {student.account_email || 'NIS'}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Belum diaktifkan</span>
+                      )}
                     </td>
                     <td className="px-5 py-3 text-right">
                       <div className="inline-flex items-center gap-2">
@@ -366,6 +390,48 @@ export default function DataSiswaPage() {
                     placeholder="Contoh: XI TKJ 1"
                     className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-red-700 focus:outline-none"
                   />
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 pt-4">
+                <p className="text-xs font-bold text-slate-900">
+                  Akun Login Siswa (Opsional)
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Isi email & kata sandi jika ingin langsung mengaktifkan login siswa, atau biarkan
+                  kosong agar siswa mengaktifkan sendiri via NIS di halaman login.
+                </p>
+
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label htmlFor="s-acc-email" className="block text-xs font-semibold text-slate-800">
+                      Email Akun Siswa
+                    </label>
+                    <input
+                      id="s-acc-email"
+                      type="email"
+                      value={accountEmail}
+                      onChange={(e) => setAccountEmail(e.target.value)}
+                      placeholder="siswa@smkprimaunggul.sch.id"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-red-700 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="s-acc-pass" className="block text-xs font-semibold text-slate-800">
+                      {editingStudent?.user_id
+                        ? 'Kata Sandi Baru (Kosongkan jika tidak diubah)'
+                        : 'Kata Sandi Akun Siswa'}
+                    </label>
+                    <input
+                      id="s-acc-pass"
+                      type="password"
+                      minLength={accountPassword ? 6 : undefined}
+                      value={accountPassword}
+                      onChange={(e) => setAccountPassword(e.target.value)}
+                      placeholder="Minimal 6 karakter"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-red-700 focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 

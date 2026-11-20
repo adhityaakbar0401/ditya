@@ -44,6 +44,11 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
 
   if (!res.ok) {
+    if (res.status === 404 && !data) {
+      throw new Error(
+        `Endpoint server (${path}) tidak ditemukan (404). Pastikan Anda membuka aplikasi melalui server aktif dan muat ulang halaman.`
+      );
+    }
     const errMsg =
       data && typeof data === 'object' && 'error' in data && typeof (data as { error: unknown }).error === 'string'
         ? (data as { error: string }).error

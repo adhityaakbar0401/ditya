@@ -20,6 +20,8 @@ import type {
 
 const PORT = Number(process.env.PORT || 3000);
 const isProduction = process.env.NODE_ENV === 'production';
+const VALID_ROLES: UserRole[] = ['admin', 'guru', 'tenaga_kependidikan', 'siswa'];
+const EMPLOYEE_ROLES: UserRole[] = ['admin', 'guru', 'tenaga_kependidikan'];
 
 // Deteksi konfigurasi Supabase nyata
 const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
@@ -144,7 +146,7 @@ function ensureDbFile(): LocalDatabase {
   }
   const raw = fs.readFileSync(DB_FILE, 'utf-8');
   const parsed = JSON.parse(raw) as Partial<LocalDatabase>;
-  const normalized: LocalDatabase = {
+  return {
     users: parsed.users || [],
     majors: parsed.majors && parsed.majors.length > 0 ? parsed.majors : DEFAULT_MAJORS,
     classes: parsed.classes || [],
@@ -152,7 +154,6 @@ function ensureDbFile(): LocalDatabase {
     employee_attendance: parsed.employee_attendance || [],
     student_attendance: parsed.student_attendance || [],
   };
-  return normalized;
 }
 
 function writeDbFile(db: LocalDatabase): void {
@@ -240,21 +241,106 @@ function sanitizeLocalUser(u: LocalUserRecord): UserProfile {
 // ============================================================================
 interface AuthenticatedRequest extends Request {
   user?: UserProfile;
+  accessToken?: string;
+}
+
+function createUserSupabaseClient(token: string): SupabaseClient | null {
+  if (!useSupabase) return null;
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  });
+}
+
+function isAdminKeyError(message?: string): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('bearer token') ||
+    lower.includes('not allowed') ||
+    lower.includes('invalid api key') ||
+    lower.includes('invalid jwt') ||
+    lower.includes('forbidden')
+  );
+}
+
+let cachedServiceRoleValid: boolean | null = null;
+
+async function hasValidServiceRoleKey(): Promise<boolean> {
+  if (!useSupabase || !supabaseAdmin) return false;
+  if (cachedServiceRoleValid !== null) return cachedServiceRoleValid;
+  try {
+    const { error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1 });
+    if (!error) {
+      cachedServiceRoleValid = true;
+      return true;
+    }
+    if (isAdminKeyError(error.message)) {
+      cachedServiceRoleValid = false;
+      return false;
+    }
+    return false;
+  } catch {
+    cachedServiceRoleValid = false;
+    return false;
+  }
+}
+
+async function getDbClient(req?: AuthenticatedRequest): Promise<SupabaseClient | null> {
+  if (!useSupabase) return null;
+  if (supabaseAdmin && (await hasValidServiceRoleKey())) {
+    return supabaseAdmin;
+  }
+  if (req?.accessToken) {
+    return createUserSupabaseClient(req.accessToken);
+  }
+  return supabasePublic || supabaseAdmin;
+}
+
+function translateSupabaseAuthError(message?: string): string {
+  const raw = (message || '').trim();
+  const lower = raw.toLowerCase();
+  if (lower.includes('email not confirmed')) {
+    return 'Email belum dikonfirmasi di Supabase. Nonaktifkan "Confirm email" di Supabase Dashboard -> Authentication -> Providers -> Email, atau cek inbox email Anda.';
+  }
+  if (lower.includes('invalid login credentials')) {
+    return 'Email/NIS atau kata sandi salah.';
+  }
+  if (lower.includes('user already registered') || lower.includes('already been registered')) {
+    return 'Email tersebut sudah terdaftar di sistem autentikasi.';
+  }
+  return raw || 'Autentikasi gagal.';
 }
 
 async function getUserFromToken(token: string): Promise<UserProfile | null> {
   if (!token) return null;
 
-  if (useSupabase && supabaseAdmin) {
-    const { data: userData, error } = await supabaseAdmin.auth.getUser(token);
+  if (useSupabase && supabasePublic) {
+    // supabasePublic.auth.getUser(token) works with both anon and service keys
+    const { data: userData, error } = await supabasePublic.auth.getUser(token);
     if (error || !userData.user) return null;
 
     const authUser = userData.user;
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', authUser.id)
-      .maybeSingle();
+    const userClient = createUserSupabaseClient(token);
+    const dbClient = supabaseAdmin || userClient;
+
+    let profile: UserProfile | null = null;
+    if (supabaseAdmin) {
+      const res = await supabaseAdmin.from('profiles').select('*').eq('id', authUser.id).maybeSingle();
+      if (!res.error && res.data) {
+        profile = res.data as UserProfile;
+      }
+    }
+    if (!profile && userClient) {
+      const res = await userClient.from('profiles').select('*').eq('id', authUser.id).maybeSingle();
+      if (!res.error && res.data) {
+        profile = res.data as UserProfile;
+      }
+    }
 
     if (profile) {
       return {
@@ -268,12 +354,14 @@ async function getUserFromToken(token: string): Promise<UserProfile | null> {
       };
     }
 
-    const { count } = await supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true });
+    const { count } = dbClient
+      ? await dbClient.from('profiles').select('*', { count: 'exact', head: true })
+      : { count: 0 };
     const metaRole = authUser.user_metadata?.role as UserRole | undefined;
     const resolvedRole: UserRole =
       (count || 0) === 0
         ? 'admin'
-        : metaRole && ['admin', 'guru', 'tenaga_kependidikan'].includes(metaRole)
+        : metaRole && VALID_ROLES.includes(metaRole)
           ? metaRole
           : 'tenaga_kependidikan';
 
@@ -287,7 +375,9 @@ async function getUserFromToken(token: string): Promise<UserProfile | null> {
       created_at: authUser.created_at,
     };
 
-    await supabaseAdmin.from('profiles').upsert(newProfile);
+    if (dbClient) {
+      await dbClient.from('profiles').upsert(newProfile);
+    }
     return newProfile;
   }
 
@@ -311,6 +401,7 @@ async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextF
     return;
   }
   req.user = user;
+  req.accessToken = token;
   next();
 }
 
@@ -337,14 +428,30 @@ app.use(express.json({ limit: '2mb' }));
 // 1. Auth Status
 app.get('/api/auth/status', async (_req: Request, res: Response) => {
   try {
-    if (useSupabase && supabaseAdmin) {
+    if (useSupabase && supabaseAdmin && supabasePublic) {
       const { data: listData, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 100 });
-      if (error) {
-        res.status(500).json({ error: error.message });
+      if (!error && listData) {
+        const count = listData.users.length;
+        res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
         return;
       }
-      const count = listData.users.length;
-      res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
+
+      // Fallback cek jumlah profil jika auth.admin ditolak (mis. service_role key bukan JWT)
+      const profRes = await supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true });
+      if (!profRes.error) {
+        const count = profRes.count || 0;
+        res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
+        return;
+      }
+
+      const pubRes = await supabasePublic.from('profiles').select('id', { count: 'exact', head: true });
+      if (!pubRes.error) {
+        const count = pubRes.count || 0;
+        res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
+        return;
+      }
+
+      res.json({ backendMode: 'supabase', hasUsers: false, userCount: 0 });
       return;
     }
 
@@ -378,51 +485,109 @@ app.post('/api/auth/register-first', async (req: Request, res: Response) => {
     const normalizedEmail = email.trim().toLowerCase();
 
     if (useSupabase && supabaseAdmin && supabasePublic) {
-      const { data: existingList } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 10 });
-      if ((existingList?.users.length || 0) > 0) {
-        res.status(403).json({ error: 'Akun admin sudah tersedia. Hubungi admin untuk pembuatan akun baru.' });
-        return;
+      const serviceRoleValid = await hasValidServiceRoleKey();
+      if (serviceRoleValid) {
+        const { data: existingList, error: listErr } = await supabaseAdmin.auth.admin.listUsers({
+          page: 1,
+          perPage: 10,
+        });
+
+        if (!listErr && (existingList?.users.length || 0) > 0) {
+          res.status(403).json({ error: 'Akun admin sudah tersedia. Hubungi admin untuk pembuatan akun baru.' });
+          return;
+        }
+      } else {
+        const { count } = await supabasePublic
+          .from('profiles')
+          .select('id', { count: 'exact', head: true });
+        if ((count || 0) > 0) {
+          res.status(403).json({ error: 'Akun admin sudah tersedia. Hubungi admin untuk pembuatan akun baru.' });
+          return;
+        }
       }
 
-      const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
-        email: normalizedEmail,
-        password,
-        email_confirm: true,
-        user_metadata: {
+      if (serviceRoleValid) {
+        const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+          email: normalizedEmail,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            full_name: full_name.trim(),
+            role: 'admin',
+            nip: (nip || '').trim(),
+            jabatan: (jabatan || 'Administrator Sistem').trim(),
+          },
+        });
+
+        if (createError || !created.user) {
+          res.status(400).json({ error: translateSupabaseAuthError(createError?.message) });
+          return;
+        }
+
+        const profile: UserProfile = {
+          id: created.user.id,
+          email: normalizedEmail,
           full_name: full_name.trim(),
           role: 'admin',
           nip: (nip || '').trim(),
           jabatan: (jabatan || 'Administrator Sistem').trim(),
+          created_at: created.user.created_at,
+        };
+        await supabaseAdmin.from('profiles').upsert(profile);
+
+        const { data: signInData, error: signInError } = await supabasePublic.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+
+        if (signInError || !signInData.session) {
+          res.status(400).json({ error: translateSupabaseAuthError(signInError?.message) });
+          return;
+        }
+
+        res.status(201).json({ token: signInData.session.access_token, user: profile });
+        return;
+      }
+
+      // Fallback ke supabasePublic.auth.signUp jika SUPABASE_SERVICE_ROLE_KEY bukan service_role JWT
+      const { data: signUpData, error: signUpErr } = await supabasePublic.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          data: {
+            full_name: full_name.trim(),
+            role: 'admin',
+            nip: (nip || '').trim(),
+            jabatan: (jabatan || 'Administrator Sistem').trim(),
+          },
         },
       });
 
-      if (createError || !created.user) {
-        res.status(400).json({ error: createError?.message || 'Gagal membuat akun admin di Supabase Auth.' });
+      if (signUpErr || !signUpData.user) {
+        res.status(400).json({ error: translateSupabaseAuthError(signUpErr?.message) });
+        return;
+      }
+      if (!signUpData.session) {
+        res.status(400).json({
+          error:
+            'Akun berhasil dibuat, namun Supabase meminta konfirmasi email. Nonaktifkan "Confirm email" di Supabase Dashboard -> Authentication -> Providers -> Email lalu coba login.',
+        });
         return;
       }
 
-      const profile: UserProfile = {
-        id: created.user.id,
-        email: normalizedEmail,
-        full_name: full_name.trim(),
-        role: 'admin',
-        nip: (nip || '').trim(),
-        jabatan: (jabatan || 'Administrator Sistem').trim(),
-        created_at: created.user.created_at,
-      };
-      await supabaseAdmin.from('profiles').upsert(profile);
-
-      const { data: signInData, error: signInError } = await supabasePublic.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
+      const profile = await getUserFromToken(signUpData.session.access_token);
+      res.status(201).json({
+        token: signUpData.session.access_token,
+        user: profile || {
+          id: signUpData.user.id,
+          email: normalizedEmail,
+          full_name: full_name.trim(),
+          role: 'admin',
+          nip: (nip || '').trim(),
+          jabatan: (jabatan || 'Administrator Sistem').trim(),
+          created_at: signUpData.user.created_at,
+        },
       });
-
-      if (signInError || !signInData.session) {
-        res.status(400).json({ error: signInError?.message || 'Akun dibuat, namun gagal masuk otomatis.' });
-        return;
-      }
-
-      res.status(201).json({ token: signInData.session.access_token, user: profile });
       return;
     }
 
@@ -453,24 +618,70 @@ app.post('/api/auth/register-first', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Login
+// 3. Login (mendukung Email atau NIS untuk Siswa)
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body as { email?: string; password?: string };
-    if (!email || !password) {
-      res.status(400).json({ error: 'Email dan kata sandi wajib diisi.' });
+    const { email, identifier, password } = req.body as {
+      email?: string;
+      identifier?: string;
+      password?: string;
+    };
+    const rawIdentifier = (identifier || email || '').trim();
+    if (!rawIdentifier || !password) {
+      res.status(400).json({ error: 'Email / NIS dan kata sandi wajib diisi.' });
       return;
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    let resolvedEmail = rawIdentifier.toLowerCase();
 
     if (useSupabase && supabasePublic && supabaseAdmin) {
+      // Jika input berupa NIS (tidak mengandung @), cari email siswa di relasi students -> profiles
+      if (!rawIdentifier.includes('@')) {
+        let foundStudentId: string | null = null;
+        let foundUserId: string | null = null;
+        let foundEmail: string | null = null;
+
+        if (await hasValidServiceRoleKey()) {
+          const { data: stu } = await supabaseAdmin
+            .from('students')
+            .select('id, user_id, profile:user_id(email)')
+            .ilike('nis', rawIdentifier)
+            .maybeSingle();
+          const linkedProfile = stu?.profile as { email?: string } | null | undefined;
+          foundStudentId = stu?.id || null;
+          foundUserId = stu?.user_id || null;
+          foundEmail = linkedProfile?.email || null;
+        } else {
+          const { data: rpcRows } = await supabasePublic.rpc('resolve_student_login_email', {
+            p_nis: rawIdentifier,
+          });
+          const firstRow = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+          if (firstRow) {
+            foundStudentId = (firstRow as { student_id?: string }).student_id || null;
+            foundUserId = (firstRow as { user_id?: string }).user_id || null;
+            foundEmail = (firstRow as { email?: string }).email || null;
+          }
+        }
+
+        if (!foundStudentId) {
+          res.status(401).json({ error: 'NIS tidak ditemukan dalam data siswa.' });
+          return;
+        }
+        if (!foundUserId || !foundEmail) {
+          res.status(401).json({
+            error: 'Akun login siswa untuk NIS ini belum aktif. Gunakan tab Aktivasi Akun Siswa atau hubungi Admin.',
+          });
+          return;
+        }
+        resolvedEmail = foundEmail.toLowerCase();
+      }
+
       const { data, error } = await supabasePublic.auth.signInWithPassword({
-        email: normalizedEmail,
+        email: resolvedEmail,
         password,
       });
       if (error || !data.session || !data.user) {
-        res.status(401).json({ error: 'Email atau kata sandi salah.' });
+        res.status(401).json({ error: translateSupabaseAuthError(error?.message) });
         return;
       }
       const user = await getUserFromToken(data.session.access_token);
@@ -483,9 +694,29 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     const db = ensureDbFile();
-    const found = db.users.find((u) => u.email.toLowerCase() === normalizedEmail);
+    if (!rawIdentifier.includes('@')) {
+      const stu = db.students.find((s) => s.nis.toLowerCase() === rawIdentifier.toLowerCase());
+      if (!stu) {
+        res.status(401).json({ error: 'NIS tidak ditemukan dalam data siswa.' });
+        return;
+      }
+      if (!stu.user_id) {
+        res.status(401).json({
+          error: 'Akun login siswa untuk NIS ini belum aktif. Gunakan tab Aktivasi Siswa atau hubungi Admin.',
+        });
+        return;
+      }
+      const linkedUser = db.users.find((u) => u.id === stu.user_id);
+      if (!linkedUser) {
+        res.status(401).json({ error: 'Akun siswa tidak ditemukan. Hubungi Admin.' });
+        return;
+      }
+      resolvedEmail = linkedUser.email.toLowerCase();
+    }
+
+    const found = db.users.find((u) => u.email.toLowerCase() === resolvedEmail);
     if (!found || !verifyPassword(password, found.password_hash)) {
-      res.status(401).json({ error: 'Email atau kata sandi salah.' });
+      res.status(401).json({ error: 'Email/NIS atau kata sandi salah.' });
       return;
     }
 
@@ -496,16 +727,214 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Current User
+// 4. Aktivasi Akun Login Siswa menggunakan NIS terdaftar
+app.post('/api/auth/activate-student', async (req: Request, res: Response) => {
+  try {
+    const { nis, email, password } = req.body as {
+      nis?: string;
+      email?: string;
+      password?: string;
+    };
+
+    if (!nis || !email || !password) {
+      res.status(400).json({ error: 'NIS, email, dan kata sandi wajib diisi.' });
+      return;
+    }
+    if (password.length < 6) {
+      res.status(400).json({ error: 'Kata sandi minimal 6 karakter.' });
+      return;
+    }
+
+    const cleanNis = nis.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (useSupabase && supabaseAdmin && supabasePublic) {
+      const serviceRoleValid = await hasValidServiceRoleKey();
+      let studentInfo: { id: string; nama: string; kelas: string; user_id: string | null } | null = null;
+
+      if (serviceRoleValid) {
+        const { data: student, error: stuErr } = await supabaseAdmin
+          .from('students')
+          .select('*')
+          .ilike('nis', cleanNis)
+          .maybeSingle();
+        if (!stuErr && student) {
+          studentInfo = {
+            id: student.id,
+            nama: student.nama,
+            kelas: student.kelas,
+            user_id: student.user_id || null,
+          };
+        }
+      } else {
+        const { data: rpcRows } = await supabasePublic.rpc('resolve_student_login_email', {
+          p_nis: cleanNis,
+        });
+        const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+        if (row && (row as { student_id?: string }).student_id) {
+          studentInfo = {
+            id: (row as { student_id: string }).student_id,
+            nama: (row as { nama?: string }).nama || 'Siswa',
+            kelas: (row as { kelas?: string }).kelas || '',
+            user_id: (row as { user_id?: string | null }).user_id || null,
+          };
+        }
+      }
+
+      if (!studentInfo) {
+        res.status(404).json({
+          error: 'NIS tidak ditemukan. Pastikan Admin telah mendaftarkan data Anda di Data Siswa.',
+        });
+        return;
+      }
+      if (studentInfo.user_id) {
+        res.status(400).json({
+          error: 'Akun siswa untuk NIS ini sudah aktif. Silakan masuk menggunakan tab Masuk.',
+        });
+        return;
+      }
+
+      if (serviceRoleValid) {
+        const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+          email: normalizedEmail,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            full_name: studentInfo.nama,
+            role: 'siswa',
+            nip: cleanNis,
+            jabatan: `Siswa ${studentInfo.kelas}`,
+          },
+        });
+
+        if (createErr || !created.user) {
+          res.status(400).json({ error: translateSupabaseAuthError(createErr?.message) });
+          return;
+        }
+
+        const profile: UserProfile = {
+          id: created.user.id,
+          email: normalizedEmail,
+          full_name: studentInfo.nama,
+          role: 'siswa',
+          nip: cleanNis,
+          jabatan: `Siswa ${studentInfo.kelas}`,
+          created_at: created.user.created_at,
+        };
+        await supabaseAdmin.from('profiles').upsert(profile);
+        await supabaseAdmin.from('students').update({ user_id: created.user.id }).eq('id', studentInfo.id);
+
+        const { data: signInData, error: signInError } = await supabasePublic.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+
+        if (signInError || !signInData.session) {
+          res.status(400).json({ error: translateSupabaseAuthError(signInError?.message) });
+          return;
+        }
+
+        res.status(201).json({ token: signInData.session.access_token, user: profile });
+        return;
+      }
+
+      const { data: signUpData, error: signUpErr } = await supabasePublic.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          data: {
+            full_name: studentInfo.nama,
+            role: 'siswa',
+            nip: cleanNis,
+            jabatan: `Siswa ${studentInfo.kelas}`,
+          },
+        },
+      });
+
+      if (signUpErr || !signUpData.user) {
+        res.status(400).json({ error: translateSupabaseAuthError(signUpErr?.message) });
+        return;
+      }
+      if (!signUpData.session) {
+        res.status(400).json({
+          error:
+            'Akun siswa dibuat, silakan nonaktifkan "Confirm email" di Supabase Dashboard -> Authentication -> Providers -> Email.',
+        });
+        return;
+      }
+
+      const userClient = createUserSupabaseClient(signUpData.session.access_token);
+      if (userClient) {
+        await userClient.rpc('activate_student_link', { p_nis: cleanNis });
+      }
+      const profile = await getUserFromToken(signUpData.session.access_token);
+      res.status(201).json({
+        token: signUpData.session.access_token,
+        user: profile || {
+          id: signUpData.user.id,
+          email: normalizedEmail,
+          full_name: studentInfo.nama,
+          role: 'siswa',
+          nip: cleanNis,
+          jabatan: `Siswa ${studentInfo.kelas}`,
+          created_at: signUpData.user.created_at,
+        },
+      });
+      return;
+    }
+
+    const db = ensureDbFile();
+    const stuIdx = db.students.findIndex((s) => s.nis.toLowerCase() === cleanNis.toLowerCase());
+    if (stuIdx < 0) {
+      res.status(404).json({
+        error: 'NIS tidak ditemukan. Pastikan Admin telah mendaftarkan data Anda di Data Siswa.',
+      });
+      return;
+    }
+    const student = db.students[stuIdx];
+    if (student.user_id) {
+      res.status(400).json({
+        error: 'Akun siswa untuk NIS ini sudah aktif. Silakan masuk menggunakan tab Masuk.',
+      });
+      return;
+    }
+    if (db.users.some((u) => u.email.toLowerCase() === normalizedEmail)) {
+      res.status(400).json({ error: 'Email sudah digunakan oleh akun lain.' });
+      return;
+    }
+
+    const newUser: LocalUserRecord = {
+      id: crypto.randomUUID(),
+      email: normalizedEmail,
+      full_name: student.nama,
+      role: 'siswa',
+      nip: student.nis,
+      jabatan: `Siswa ${student.kelas}`,
+      created_at: new Date().toISOString(),
+      password_hash: hashPassword(password),
+    };
+    db.users.push(newUser);
+    db.students[stuIdx] = { ...student, user_id: newUser.id, account_email: normalizedEmail };
+    writeDbFile(db);
+
+    const token = signLocalToken(newUser.id);
+    res.status(201).json({ token, user: sanitizeLocalUser(newUser) });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal aktivasi akun siswa.' });
+  }
+});
+
+// 5. Current User
 app.get('/api/auth/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   res.json({ user: req.user });
 });
 
-// 5. Master Jurusan & Kelas Relasional
-app.get('/api/majors', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+// 6. Master Jurusan & Kelas Relasional
+app.get('/api/majors', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (useSupabase && supabaseAdmin) {
-      const { data, error } = await supabaseAdmin.from('majors').select('*').order('code');
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data, error } = await dbClient.from('majors').select('*').order('code');
       if (error) {
         res.status(500).json({ error: error.message });
         return;
@@ -520,10 +949,11 @@ app.get('/api/majors', requireAuth, async (_req: AuthenticatedRequest, res: Resp
   }
 });
 
-app.get('/api/classes', requireAuth, requireRole(['admin', 'guru']), async (_req: AuthenticatedRequest, res: Response) => {
+app.get('/api/classes', requireAuth, requireRole(['admin', 'guru']), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (useSupabase && supabaseAdmin) {
-      const { data, error } = await supabaseAdmin
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data, error } = await dbClient
         .from('classes')
         .select('*, major:major_code(code, name, cluster), homeroom:homeroom_teacher_id(id, full_name)')
         .order('name');
@@ -564,22 +994,134 @@ app.get('/api/classes', requireAuth, requireRole(['admin', 'guru']), async (_req
   }
 });
 
-// 6. Dashboard Summary (dengan Relasi Join Langsung)
+// 7. Dashboard Summary
 app.get('/api/dashboard/summary', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const today = getJakartaDate();
     const currentUser = req.user!;
 
-    if (useSupabase && supabaseAdmin) {
+    const dbClient = await getDbClient(req);
+
+    if (currentUser.role === 'siswa') {
+      if (useSupabase && dbClient) {
+        const { data: student } = await dbClient
+          .from('students')
+          .select('*, major:jurusan(code, name)')
+          .eq('user_id', currentUser.id)
+          .maybeSingle();
+
+        const myStudentProfile: Student | null = student
+          ? {
+              id: student.id,
+              nis: student.nis,
+              nama: student.nama,
+              user_id: student.user_id,
+              class_id: student.class_id,
+              kelas: student.kelas,
+              jurusan: student.jurusan,
+              major_name: (student.major as { name?: string } | null)?.name || '',
+              created_at: student.created_at,
+            }
+          : null;
+
+        let myLogs: StudentAttendanceRecord[] = [];
+        if (myStudentProfile) {
+          const { data: logs } = await dbClient
+            .from('student_attendance')
+            .select('*, recorder:recorded_by(id, full_name)')
+            .eq('student_id', myStudentProfile.id)
+            .order('date', { ascending: false })
+            .limit(30);
+
+          myLogs = (logs || []).map(
+            (r: StudentAttendanceRecord & { recorder?: { full_name?: string } | null }) => ({
+              ...r,
+              student_nis: myStudentProfile.nis,
+              student_nama: myStudentProfile.nama,
+              student_kelas: myStudentProfile.kelas,
+              recorded_by_name: r.recorder?.full_name || 'Mandiri',
+            })
+          );
+        }
+
+        const myStudentAttendanceToday = myLogs.find((r) => r.date === today) || null;
+        res.json({
+          today,
+          myAttendanceToday: null,
+          myStudentProfile,
+          myStudentAttendanceToday,
+          totalEmployees: 0,
+          employeesPresentToday: 0,
+          employeesOnLeaveToday: 0,
+          totalStudents: 1,
+          studentsMarkedToday: myStudentAttendanceToday ? 1 : 0,
+          studentStatusCountsToday: {
+            Hadir: myLogs.filter((r) => r.status === 'Hadir').length,
+            Izin: myLogs.filter((r) => r.status === 'Izin').length,
+            Sakit: myLogs.filter((r) => r.status === 'Sakit').length,
+            Alpha: myLogs.filter((r) => r.status === 'Alpha').length,
+          },
+          recentEmployeeLogs: [],
+          recentStudentLogs: myLogs.slice(0, 8),
+        });
+        return;
+      }
+
+      const db = ensureDbFile();
+      const majorMap = new Map(db.majors.map((m) => [m.code, m.name]));
+      const userMap = new Map(db.users.map((u) => [u.id, u.full_name]));
+      const stu = db.students.find((s) => s.user_id === currentUser.id) || null;
+      const myStudentProfile: Student | null = stu
+        ? { ...stu, major_name: majorMap.get(stu.jurusan) || '' }
+        : null;
+
+      const myLogs = myStudentProfile
+        ? db.student_attendance
+            .filter((r) => r.student_id === myStudentProfile.id)
+            .sort((a, b) => b.date.localeCompare(a.date))
+            .map((r) => ({
+              ...r,
+              student_nis: myStudentProfile.nis,
+              student_nama: myStudentProfile.nama,
+              student_kelas: myStudentProfile.kelas,
+              recorded_by_name: r.recorded_by ? userMap.get(r.recorded_by) || 'Mandiri' : 'Sistem',
+            }))
+        : [];
+
+      const myStudentAttendanceToday = myLogs.find((r) => r.date === today) || null;
+
+      res.json({
+        today,
+        myAttendanceToday: null,
+        myStudentProfile,
+        myStudentAttendanceToday,
+        totalEmployees: 0,
+        employeesPresentToday: 0,
+        employeesOnLeaveToday: 0,
+        totalStudents: 1,
+        studentsMarkedToday: myStudentAttendanceToday ? 1 : 0,
+        studentStatusCountsToday: {
+          Hadir: myLogs.filter((r) => r.status === 'Hadir').length,
+          Izin: myLogs.filter((r) => r.status === 'Izin').length,
+          Sakit: myLogs.filter((r) => r.status === 'Sakit').length,
+          Alpha: myLogs.filter((r) => r.status === 'Alpha').length,
+        },
+        recentEmployeeLogs: [],
+        recentStudentLogs: myLogs.slice(0, 8),
+      });
+      return;
+    }
+
+    if (useSupabase && dbClient) {
       const [profilesCountRes, studentsCountRes, empAttRes, stuAttRes] = await Promise.all([
-        supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }),
-        supabaseAdmin.from('students').select('*', { count: 'exact', head: true }),
-        supabaseAdmin
+        dbClient.from('profiles').select('*', { count: 'exact', head: true }).in('role', EMPLOYEE_ROLES),
+        dbClient.from('students').select('*', { count: 'exact', head: true }),
+        dbClient
           .from('employee_attendance')
           .select('*, profile:user_id(id, full_name, role, jabatan)')
           .eq('date', today)
           .order('updated_at', { ascending: false }),
-        supabaseAdmin
+        dbClient
           .from('student_attendance')
           .select('*, student:student_id(id, nis, nama, kelas, jurusan)')
           .eq('date', today)
@@ -696,7 +1238,7 @@ app.get('/api/dashboard/summary', requireAuth, async (req: AuthenticatedRequest,
     res.json({
       today,
       myAttendanceToday,
-      totalEmployees: db.users.length,
+      totalEmployees: db.users.filter((u) => EMPLOYEE_ROLES.includes(u.role)).length,
       employeesPresentToday,
       employeesOnLeaveToday,
       totalStudents: db.students.length,
@@ -710,8 +1252,8 @@ app.get('/api/dashboard/summary', requireAuth, async (req: AuthenticatedRequest,
   }
 });
 
-// 7. Absensi Karyawan (dengan Relasi Join `profile:user_id`)
-app.get('/api/attendance/employees', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+// 8. Absensi Karyawan (khusus role karyawan: admin, guru, tenaga_kependidikan)
+app.get('/api/attendance/employees', requireAuth, requireRole(EMPLOYEE_ROLES), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const currentUser = req.user!;
     const { startDate, endDate, status, scope } = req.query as {
@@ -722,9 +1264,10 @@ app.get('/api/attendance/employees', requireAuth, async (req: AuthenticatedReque
     };
 
     const onlySelf = currentUser.role !== 'admin' || scope === 'self';
+    const dbClient = await getDbClient(req);
 
-    if (useSupabase && supabaseAdmin) {
-      let query = supabaseAdmin
+    if (useSupabase && dbClient) {
+      let query = dbClient
         .from('employee_attendance')
         .select('*, profile:user_id(id, full_name, email, role, nip, jabatan)')
         .order('date', { ascending: false })
@@ -803,7 +1346,7 @@ app.get('/api/attendance/employees', requireAuth, async (req: AuthenticatedReque
   }
 });
 
-app.post('/api/attendance/employees/check-in', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/attendance/employees/check-in', requireAuth, requireRole(EMPLOYEE_ROLES), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const currentUser = req.user!;
     const { status, notes } = req.body as {
@@ -817,8 +1360,9 @@ app.post('/api/attendance/employees/check-in', requireAuth, async (req: Authenti
     const nowTime = getJakartaTime();
     const nowIso = new Date().toISOString();
 
-    if (useSupabase && supabaseAdmin) {
-      const { data: existing } = await supabaseAdmin
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data: existing } = await dbClient
         .from('employee_attendance')
         .select('*')
         .eq('user_id', currentUser.id)
@@ -826,7 +1370,7 @@ app.post('/api/attendance/employees/check-in', requireAuth, async (req: Authenti
         .maybeSingle();
 
       if (existing) {
-        const { data: updated, error } = await supabaseAdmin
+        const { data: updated, error } = await dbClient
           .from('employee_attendance')
           .update({
             status: resolvedStatus,
@@ -846,7 +1390,7 @@ app.post('/api/attendance/employees/check-in', requireAuth, async (req: Authenti
         return;
       }
 
-      const { data: inserted, error } = await supabaseAdmin
+      const { data: inserted, error } = await dbClient
         .from('employee_attendance')
         .insert({
           user_id: currentUser.id,
@@ -901,15 +1445,16 @@ app.post('/api/attendance/employees/check-in', requireAuth, async (req: Authenti
   }
 });
 
-app.post('/api/attendance/employees/check-out', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/attendance/employees/check-out', requireAuth, requireRole(EMPLOYEE_ROLES), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const currentUser = req.user!;
     const today = getJakartaDate();
     const nowTime = getJakartaTime();
     const nowIso = new Date().toISOString();
 
-    if (useSupabase && supabaseAdmin) {
-      const { data: existing } = await supabaseAdmin
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data: existing } = await dbClient
         .from('employee_attendance')
         .select('*')
         .eq('user_id', currentUser.id)
@@ -921,7 +1466,7 @@ app.post('/api/attendance/employees/check-out', requireAuth, async (req: Authent
         return;
       }
 
-      const { data: updated, error } = await supabaseAdmin
+      const { data: updated, error } = await dbClient
         .from('employee_attendance')
         .update({ check_out: nowTime, updated_at: nowIso })
         .eq('id', existing.id)
@@ -955,39 +1500,51 @@ app.post('/api/attendance/employees/check-out', requireAuth, async (req: Authent
   }
 });
 
-// 8. Data Siswa (Relasi ke `majors` & `classes`)
-app.get('/api/students', requireAuth, requireRole(['admin', 'guru']), async (_req: AuthenticatedRequest, res: Response) => {
+// 9. Data Siswa (dengan dukungan opsional pembuatan/sinkronisasi Akun Login Siswa)
+app.get('/api/students', requireAuth, requireRole(['admin', 'guru']), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (useSupabase && supabaseAdmin) {
-      const { data, error } = await supabaseAdmin
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data, error } = await dbClient
         .from('students')
-        .select('*, major:jurusan(code, name)')
+        .select('*, major:jurusan(code, name), profile:user_id(id, email)')
         .order('kelas', { ascending: true })
         .order('nama', { ascending: true });
       if (error) {
         res.status(500).json({ error: error.message });
         return;
       }
-      const mapped = (data || []).map((s: Student & { major?: { name?: string } | null }) => ({
-        id: s.id,
-        nis: s.nis,
-        nama: s.nama,
-        class_id: s.class_id,
-        kelas: s.kelas,
-        jurusan: s.jurusan,
-        major_name: s.major?.name || '',
-        created_at: s.created_at,
-      }));
+      const mapped = (data || []).map(
+        (
+          s: Student & {
+            major?: { name?: string } | null;
+            profile?: { id?: string; email?: string } | null;
+          }
+        ) => ({
+          id: s.id,
+          nis: s.nis,
+          nama: s.nama,
+          user_id: s.user_id || null,
+          account_email: s.profile?.email || null,
+          class_id: s.class_id,
+          kelas: s.kelas,
+          jurusan: s.jurusan,
+          major_name: s.major?.name || '',
+          created_at: s.created_at,
+        })
+      );
       res.json({ students: mapped });
       return;
     }
 
     const db = ensureDbFile();
     const majorMap = new Map(db.majors.map((m) => [m.code, m.name]));
+    const userMap = new Map(db.users.map((u) => [u.id, u.email]));
     const sorted = [...db.students]
       .sort((a, b) => a.kelas.localeCompare(b.kelas) || a.nama.localeCompare(b.nama))
       .map((s) => ({
         ...s,
+        account_email: s.user_id ? userMap.get(s.user_id) || null : null,
         major_name: majorMap.get(s.jurusan) || '',
       }));
     res.json({ students: sorted });
@@ -998,11 +1555,13 @@ app.get('/api/students', requireAuth, requireRole(['admin', 'guru']), async (_re
 
 app.post('/api/students', requireAuth, requireRole(['admin']), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { nis, nama, kelas, jurusan } = req.body as {
+    const { nis, nama, kelas, jurusan, account_email, account_password } = req.body as {
       nis?: string;
       nama?: string;
       kelas?: string;
       jurusan?: string;
+      account_email?: string;
+      account_password?: string;
     };
 
     if (!nis || !nama || !kelas) {
@@ -1014,11 +1573,22 @@ app.post('/api/students', requireAuth, requireRole(['admin']), async (req: Authe
     const cleanNama = nama.trim();
     const cleanKelas = kelas.trim();
     const cleanJurusan = (jurusan || cleanKelas.split(' ')[1] || 'TKJ').trim().toUpperCase();
+    const cleanEmail = (account_email || '').trim().toLowerCase();
+    const cleanPassword = (account_password || '').trim();
 
-    if (useSupabase && supabaseAdmin) {
-      // Pastikan relasi class ada dan dapatkan class_id
+    if (cleanEmail && cleanPassword && cleanPassword.length < 6) {
+      res.status(400).json({ error: 'Kata sandi akun siswa minimal 6 karakter.' });
+      return;
+    }
+    if ((cleanEmail && !cleanPassword) || (!cleanEmail && cleanPassword)) {
+      res.status(400).json({ error: 'Untuk membuat akun login siswa, isi Email dan Kata Sandi sekaligus.' });
+      return;
+    }
+
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
       let classId: string | null = null;
-      const { data: existingClass } = await supabaseAdmin
+      const { data: existingClass } = await dbClient
         .from('classes')
         .select('id')
         .eq('name', cleanKelas)
@@ -1027,7 +1597,7 @@ app.post('/api/students', requireAuth, requireRole(['admin']), async (req: Authe
       if (existingClass) {
         classId = existingClass.id;
       } else {
-        const { data: createdClass } = await supabaseAdmin
+        const { data: createdClass } = await dbClient
           .from('classes')
           .insert({
             name: cleanKelas,
@@ -1039,11 +1609,48 @@ app.post('/api/students', requireAuth, requireRole(['admin']), async (req: Authe
         classId = createdClass?.id || null;
       }
 
-      const { data, error } = await supabaseAdmin
+      let linkedUserId: string | null = null;
+      if (cleanEmail && cleanPassword) {
+        if (!(await hasValidServiceRoleKey()) || !supabaseAdmin) {
+          res.status(400).json({
+            error:
+              'Pembuatan akun login siswa langsung oleh Admin membutuhkan SUPABASE_SERVICE_ROLE_KEY (service_role) yang valid. Anda tetap dapat menyimpan Data Siswa tanpa email/sandi, lalu siswa mengaktifkan akun mandiri lewat menu Aktivasi Akun Siswa.',
+          });
+          return;
+        }
+        const { data: createdUser, error: userErr } = await supabaseAdmin.auth.admin.createUser({
+          email: cleanEmail,
+          password: cleanPassword,
+          email_confirm: true,
+          user_metadata: {
+            full_name: cleanNama,
+            role: 'siswa',
+            nip: cleanNis,
+            jabatan: `Siswa ${cleanKelas}`,
+          },
+        });
+        if (userErr || !createdUser.user) {
+          res.status(400).json({ error: translateSupabaseAuthError(userErr?.message) });
+          return;
+        }
+        linkedUserId = createdUser.user.id;
+        await dbClient.from('profiles').upsert({
+          id: linkedUserId,
+          email: cleanEmail,
+          full_name: cleanNama,
+          role: 'siswa',
+          nip: cleanNis,
+          jabatan: `Siswa ${cleanKelas}`,
+          created_at: createdUser.user.created_at,
+        });
+      }
+
+      const { data, error } = await dbClient
         .from('students')
         .insert({
           nis: cleanNis,
           nama: cleanNama,
+          user_id: linkedUserId,
           class_id: classId,
           kelas: cleanKelas,
           jurusan: cleanJurusan,
@@ -1051,6 +1658,9 @@ app.post('/api/students', requireAuth, requireRole(['admin']), async (req: Authe
         .select()
         .single();
       if (error) {
+        if (linkedUserId && supabaseAdmin) {
+          await supabaseAdmin.auth.admin.deleteUser(linkedUserId);
+        }
         res.status(400).json({ error: error.message.includes('duplicate') ? 'NIS sudah terdaftar.' : error.message });
         return;
       }
@@ -1064,11 +1674,32 @@ app.post('/api/students', requireAuth, requireRole(['admin']), async (req: Authe
       return;
     }
 
+    let linkedUserId: string | null = null;
+    if (cleanEmail && cleanPassword) {
+      if (db.users.some((u) => u.email.toLowerCase() === cleanEmail)) {
+        res.status(400).json({ error: 'Email akun siswa sudah digunakan akun lain.' });
+        return;
+      }
+      linkedUserId = crypto.randomUUID();
+      db.users.push({
+        id: linkedUserId,
+        email: cleanEmail,
+        full_name: cleanNama,
+        role: 'siswa',
+        nip: cleanNis,
+        jabatan: `Siswa ${cleanKelas}`,
+        created_at: new Date().toISOString(),
+        password_hash: hashPassword(cleanPassword),
+      });
+    }
+
     const cls = ensureLocalClassRelation(db, cleanKelas, cleanJurusan);
     const student: Student = {
       id: crypto.randomUUID(),
       nis: cleanNis,
       nama: cleanNama,
+      user_id: linkedUserId,
+      account_email: cleanEmail || null,
       class_id: cls.id,
       kelas: cleanKelas,
       jurusan: cleanJurusan,
@@ -1085,11 +1716,13 @@ app.post('/api/students', requireAuth, requireRole(['admin']), async (req: Authe
 app.patch('/api/students/:id', requireAuth, requireRole(['admin']), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { nis, nama, kelas, jurusan } = req.body as {
+    const { nis, nama, kelas, jurusan, account_email, account_password } = req.body as {
       nis?: string;
       nama?: string;
       kelas?: string;
       jurusan?: string;
+      account_email?: string;
+      account_password?: string;
     };
 
     if (!nis || !nama || !kelas) {
@@ -1097,12 +1730,33 @@ app.patch('/api/students/:id', requireAuth, requireRole(['admin']), async (req: 
       return;
     }
 
+    const cleanNis = nis.trim();
+    const cleanNama = nama.trim();
     const cleanKelas = kelas.trim();
     const cleanJurusan = (jurusan || 'TKJ').trim().toUpperCase();
+    const cleanEmail = (account_email || '').trim().toLowerCase();
+    const cleanPassword = (account_password || '').trim();
 
-    if (useSupabase && supabaseAdmin) {
+    if (cleanPassword && cleanPassword.length < 6) {
+      res.status(400).json({ error: 'Kata sandi baru minimal 6 karakter.' });
+      return;
+    }
+
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data: currentStudent } = await dbClient
+        .from('students')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (!currentStudent) {
+        res.status(404).json({ error: 'Siswa tidak ditemukan.' });
+        return;
+      }
+
       let classId: string | null = null;
-      const { data: existingClass } = await supabaseAdmin
+      const { data: existingClass } = await dbClient
         .from('classes')
         .select('id')
         .eq('name', cleanKelas)
@@ -1111,7 +1765,7 @@ app.patch('/api/students/:id', requireAuth, requireRole(['admin']), async (req: 
       if (existingClass) {
         classId = existingClass.id;
       } else {
-        const { data: createdClass } = await supabaseAdmin
+        const { data: createdClass } = await dbClient
           .from('classes')
           .insert({
             name: cleanKelas,
@@ -1123,11 +1777,87 @@ app.patch('/api/students/:id', requireAuth, requireRole(['admin']), async (req: 
         classId = createdClass?.id || null;
       }
 
-      const { data, error } = await supabaseAdmin
+      let linkedUserId: string | null = currentStudent.user_id || null;
+      if (linkedUserId) {
+        if (cleanEmail || cleanPassword) {
+          if (!(await hasValidServiceRoleKey()) || !supabaseAdmin) {
+            res.status(400).json({
+              error: 'Pembaruan email/kata sandi akun login siswa membutuhkan SUPABASE_SERVICE_ROLE_KEY (service_role) yang valid.',
+            });
+            return;
+          }
+          const updatePayload: {
+            email?: string;
+            password?: string;
+            user_metadata: Record<string, string>;
+          } = {
+            user_metadata: {
+              full_name: cleanNama,
+              role: 'siswa',
+              nip: cleanNis,
+              jabatan: `Siswa ${cleanKelas}`,
+            },
+          };
+          if (cleanEmail) updatePayload.email = cleanEmail;
+          if (cleanPassword) updatePayload.password = cleanPassword;
+
+          const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(linkedUserId, updatePayload);
+          if (authErr) {
+            res.status(400).json({ error: translateSupabaseAuthError(authErr.message) });
+            return;
+          }
+          await dbClient
+            .from('profiles')
+            .update({
+              ...(cleanEmail ? { email: cleanEmail } : {}),
+              full_name: cleanNama,
+              nip: cleanNis,
+              jabatan: `Siswa ${cleanKelas}`,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', linkedUserId);
+        }
+      } else if (cleanEmail && cleanPassword) {
+        if (!(await hasValidServiceRoleKey()) || !supabaseAdmin) {
+          res.status(400).json({
+            error:
+              'Pembuatan akun login siswa langsung oleh Admin membutuhkan SUPABASE_SERVICE_ROLE_KEY (service_role) yang valid.',
+          });
+          return;
+        }
+        const { data: createdUser, error: userErr } = await supabaseAdmin.auth.admin.createUser({
+          email: cleanEmail,
+          password: cleanPassword,
+          email_confirm: true,
+          user_metadata: {
+            full_name: cleanNama,
+            role: 'siswa',
+            nip: cleanNis,
+            jabatan: `Siswa ${cleanKelas}`,
+          },
+        });
+        if (userErr || !createdUser.user) {
+          res.status(400).json({ error: translateSupabaseAuthError(userErr?.message) });
+          return;
+        }
+        linkedUserId = createdUser.user.id;
+        await dbClient.from('profiles').upsert({
+          id: linkedUserId,
+          email: cleanEmail,
+          full_name: cleanNama,
+          role: 'siswa',
+          nip: cleanNis,
+          jabatan: `Siswa ${cleanKelas}`,
+          created_at: createdUser.user.created_at,
+        });
+      }
+
+      const { data, error } = await dbClient
         .from('students')
         .update({
-          nis: nis.trim(),
-          nama: nama.trim(),
+          nis: cleanNis,
+          nama: cleanNama,
+          user_id: linkedUserId,
           class_id: classId,
           kelas: cleanKelas,
           jurusan: cleanJurusan,
@@ -1150,15 +1880,53 @@ app.patch('/api/students/:id', requireAuth, requireRole(['admin']), async (req: 
       res.status(404).json({ error: 'Siswa tidak ditemukan.' });
       return;
     }
-    if (db.students.some((s) => s.id !== id && s.nis.toLowerCase() === nis.trim().toLowerCase())) {
+    if (db.students.some((s) => s.id !== id && s.nis.toLowerCase() === cleanNis.toLowerCase())) {
       res.status(400).json({ error: 'NIS sudah digunakan siswa lain.' });
       return;
     }
+
+    let linkedUserId: string | null = db.students[idx].user_id || null;
+    if (linkedUserId) {
+      const uIdx = db.users.findIndex((u) => u.id === linkedUserId);
+      if (uIdx >= 0) {
+        if (cleanEmail && db.users.some((u) => u.id !== linkedUserId && u.email.toLowerCase() === cleanEmail)) {
+          res.status(400).json({ error: 'Email sudah digunakan pengguna lain.' });
+          return;
+        }
+        db.users[uIdx] = {
+          ...db.users[uIdx],
+          email: cleanEmail || db.users[uIdx].email,
+          full_name: cleanNama,
+          nip: cleanNis,
+          jabatan: `Siswa ${cleanKelas}`,
+          password_hash: cleanPassword ? hashPassword(cleanPassword) : db.users[uIdx].password_hash,
+        };
+      }
+    } else if (cleanEmail && cleanPassword) {
+      if (db.users.some((u) => u.email.toLowerCase() === cleanEmail)) {
+        res.status(400).json({ error: 'Email sudah digunakan pengguna lain.' });
+        return;
+      }
+      linkedUserId = crypto.randomUUID();
+      db.users.push({
+        id: linkedUserId,
+        email: cleanEmail,
+        full_name: cleanNama,
+        role: 'siswa',
+        nip: cleanNis,
+        jabatan: `Siswa ${cleanKelas}`,
+        created_at: new Date().toISOString(),
+        password_hash: hashPassword(cleanPassword),
+      });
+    }
+
     const cls = ensureLocalClassRelation(db, cleanKelas, cleanJurusan);
     db.students[idx] = {
       ...db.students[idx],
-      nis: nis.trim(),
-      nama: nama.trim(),
+      nis: cleanNis,
+      nama: cleanNama,
+      user_id: linkedUserId,
+      account_email: cleanEmail || db.students[idx].account_email || null,
       class_id: cls.id,
       kelas: cleanKelas,
       jurusan: cleanJurusan,
@@ -1173,8 +1941,9 @@ app.patch('/api/students/:id', requireAuth, requireRole(['admin']), async (req: 
 app.delete('/api/students/:id', requireAuth, requireRole(['admin']), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { id } = req.params;
-    if (useSupabase && supabaseAdmin) {
-      const { error } = await supabaseAdmin.from('students').delete().eq('id', id);
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { error } = await dbClient.from('students').delete().eq('id', id);
       if (error) {
         res.status(400).json({ error: error.message });
         return;
@@ -1193,7 +1962,186 @@ app.delete('/api/students/:id', requireAuth, requireRole(['admin']), async (req:
   }
 });
 
-// 9. Absensi Siswa & Rekap Absensi Siswa (dengan Relasi Join `student:student_id` & `recorder:recorded_by`)
+// 10. Absensi Mandiri Siswa (khusus role 'siswa')
+app.get('/api/attendance/students/self', requireAuth, requireRole(['siswa']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUser = req.user!;
+    const { status } = req.query as { status?: string };
+    const today = getJakartaDate();
+
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data: student } = await dbClient
+        .from('students')
+        .select('*, major:jurusan(code, name)')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      if (!student) {
+        res.json({ student: null, records: [], today });
+        return;
+      }
+
+      let query = dbClient
+        .from('student_attendance')
+        .select('*, recorder:recorded_by(id, full_name)')
+        .eq('student_id', student.id)
+        .order('date', { ascending: false });
+
+      if (status && status !== 'all') query = query.eq('status', status);
+
+      const { data: records, error } = await query;
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+
+      const mapped = (records || []).map(
+        (r: StudentAttendanceRecord & { recorder?: { full_name?: string } | null }) => ({
+          ...r,
+          student_nis: student.nis,
+          student_nama: student.nama,
+          student_kelas: student.kelas,
+          student_jurusan: student.jurusan,
+          recorded_by_name: r.recorder?.full_name || 'Mandiri',
+        })
+      );
+
+      res.json({
+        student: {
+          ...student,
+          major_name: (student.major as { name?: string } | null)?.name || '',
+        },
+        records: mapped,
+        today,
+      });
+      return;
+    }
+
+    const db = ensureDbFile();
+    const majorMap = new Map(db.majors.map((m) => [m.code, m.name]));
+    const userMap = new Map(db.users.map((u) => [u.id, u.full_name]));
+    const student = db.students.find((s) => s.user_id === currentUser.id) || null;
+    if (!student) {
+      res.json({ student: null, records: [], today });
+      return;
+    }
+
+    let list = db.student_attendance.filter((r) => r.student_id === student.id);
+    if (status && status !== 'all') list = list.filter((r) => r.status === status);
+
+    const mapped = [...list]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((r) => ({
+        ...r,
+        student_nis: student.nis,
+        student_nama: student.nama,
+        student_kelas: student.kelas,
+        student_jurusan: student.jurusan,
+        recorded_by_name: r.recorded_by ? userMap.get(r.recorded_by) || 'Mandiri' : 'Sistem',
+      }));
+
+    res.json({
+      student: { ...student, major_name: majorMap.get(student.jurusan) || '' },
+      records: mapped,
+      today,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal memuat absensi siswa.' });
+  }
+});
+
+app.post('/api/attendance/students/self', requireAuth, requireRole(['siswa']), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUser = req.user!;
+    const { status, notes } = req.body as {
+      status?: StudentAttendanceStatus;
+      notes?: string;
+    };
+
+    const allowedSelfStatus: StudentAttendanceStatus[] = ['Hadir', 'Izin', 'Sakit'];
+    const resolvedStatus: StudentAttendanceStatus =
+      status && allowedSelfStatus.includes(status) ? status : 'Hadir';
+    const today = getJakartaDate();
+    const nowIso = new Date().toISOString();
+
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      const { data: student } = await dbClient
+        .from('students')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+
+      if (!student) {
+        res.status(400).json({ error: 'Profil data siswa belum tertaut dengan akun ini. Hubungi Admin.' });
+        return;
+      }
+
+      const { data: saved, error } = await dbClient
+        .from('student_attendance')
+        .upsert(
+          {
+            student_id: student.id,
+            date: today,
+            status: resolvedStatus,
+            notes: (notes || '').trim(),
+            recorded_by: currentUser.id,
+            updated_at: nowIso,
+          },
+          { onConflict: 'student_id,date' }
+        )
+        .select()
+        .single();
+
+      if (error) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      res.json({ record: saved });
+      return;
+    }
+
+    const db = ensureDbFile();
+    const student = db.students.find((s) => s.user_id === currentUser.id);
+    if (!student) {
+      res.status(400).json({ error: 'Profil data siswa belum tertaut dengan akun ini. Hubungi Admin.' });
+      return;
+    }
+
+    const idx = db.student_attendance.findIndex((r) => r.student_id === student.id && r.date === today);
+    if (idx >= 0) {
+      db.student_attendance[idx] = {
+        ...db.student_attendance[idx],
+        status: resolvedStatus,
+        notes: (notes || '').trim(),
+        recorded_by: currentUser.id,
+        updated_at: nowIso,
+      };
+      writeDbFile(db);
+      res.json({ record: db.student_attendance[idx] });
+      return;
+    }
+
+    const created: StudentAttendanceRecord = {
+      id: crypto.randomUUID(),
+      student_id: student.id,
+      date: today,
+      status: resolvedStatus,
+      notes: (notes || '').trim(),
+      recorded_by: currentUser.id,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+    db.student_attendance.push(created);
+    writeDbFile(db);
+    res.status(201).json({ record: created });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menyimpan absensi siswa.' });
+  }
+});
+
+// 11. Absensi Siswa & Rekap Absensi Siswa (Admin & Guru)
 app.get('/api/attendance/students', requireAuth, requireRole(['admin', 'guru']), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { date, startDate, endDate, kelas, status } = req.query as {
@@ -1204,8 +2152,9 @@ app.get('/api/attendance/students', requireAuth, requireRole(['admin', 'guru']),
       status?: string;
     };
 
-    if (useSupabase && supabaseAdmin) {
-      let query = supabaseAdmin
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      let query = dbClient
         .from('student_attendance')
         .select('*, student:student_id(id, nis, nama, kelas, jurusan), recorder:recorded_by(id, full_name)')
         .order('date', { ascending: false })
@@ -1303,7 +2252,8 @@ app.post('/api/attendance/students/batch', requireAuth, requireRole(['admin', 'g
 
     const nowIso = new Date().toISOString();
 
-    if (useSupabase && supabaseAdmin) {
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
       const rows = entries.map((e) => ({
         student_id: e.student_id,
         date: targetDate,
@@ -1313,7 +2263,7 @@ app.post('/api/attendance/students/batch', requireAuth, requireRole(['admin', 'g
         updated_at: nowIso,
       }));
 
-      const { error } = await supabaseAdmin
+      const { error } = await dbClient
         .from('student_attendance')
         .upsert(rows, { onConflict: 'student_id,date' });
 
@@ -1363,47 +2313,52 @@ app.post('/api/attendance/students/batch', requireAuth, requireRole(['admin', 'g
   }
 });
 
-// 10. User Management (Admin only - Full Sync with Supabase Auth + Hard Delete)
-app.get('/api/users', requireAuth, requireRole(['admin']), async (_req: AuthenticatedRequest, res: Response) => {
+// 12. User Management (Admin only - Full Sync with Supabase Auth + Hard Delete)
+app.get('/api/users', requireAuth, requireRole(['admin']), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (useSupabase && supabaseAdmin) {
-      const [{ data: authList, error: authErr }, { data: profiles }] = await Promise.all([
-        supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 }),
-        supabaseAdmin.from('profiles').select('*'),
-      ]);
+    const dbClient = await getDbClient(req);
+    if (useSupabase && dbClient) {
+      if (supabaseAdmin && (await hasValidServiceRoleKey())) {
+        const [{ data: authList, error: authErr }, { data: profiles }] = await Promise.all([
+          supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 200 }),
+          dbClient.from('profiles').select('*'),
+        ]);
 
-      if (authErr) {
-        res.status(500).json({ error: authErr.message });
-        return;
-      }
+        if (!authErr && authList) {
+          const profileMap = new Map((profiles || []).map((p: UserProfile) => [p.id, p]));
+          const syncedUsers: UserProfile[] = [];
 
-      const profileMap = new Map((profiles || []).map((p: UserProfile) => [p.id, p]));
-      const syncedUsers: UserProfile[] = [];
+          for (const au of authList.users) {
+            const p = profileMap.get(au.id);
+            if (p) {
+              syncedUsers.push(p);
+            } else {
+              const metaRole = au.user_metadata?.role as UserRole | undefined;
+              const fallbackProfile: UserProfile = {
+                id: au.id,
+                email: au.email || '',
+                full_name: (au.user_metadata?.full_name as string) || au.email?.split('@')[0] || 'Pengguna',
+                role: metaRole && VALID_ROLES.includes(metaRole) ? metaRole : 'tenaga_kependidikan',
+                nip: (au.user_metadata?.nip as string) || '',
+                jabatan: (au.user_metadata?.jabatan as string) || '',
+                created_at: au.created_at,
+              };
+              await dbClient.from('profiles').upsert(fallbackProfile);
+              syncedUsers.push(fallbackProfile);
+            }
+          }
 
-      for (const au of authList.users) {
-        const p = profileMap.get(au.id);
-        if (p) {
-          syncedUsers.push(p);
-        } else {
-          const metaRole = au.user_metadata?.role as UserRole | undefined;
-          const fallbackProfile: UserProfile = {
-            id: au.id,
-            email: au.email || '',
-            full_name: (au.user_metadata?.full_name as string) || au.email?.split('@')[0] || 'Pengguna',
-            role:
-              metaRole && ['admin', 'guru', 'tenaga_kependidikan'].includes(metaRole)
-                ? metaRole
-                : 'tenaga_kependidikan',
-            nip: (au.user_metadata?.nip as string) || '',
-            jabatan: (au.user_metadata?.jabatan as string) || '',
-            created_at: au.created_at,
-          };
-          await supabaseAdmin.from('profiles').upsert(fallbackProfile);
-          syncedUsers.push(fallbackProfile);
+          res.json({ users: syncedUsers.sort((a, b) => a.full_name.localeCompare(b.full_name)) });
+          return;
         }
       }
 
-      res.json({ users: syncedUsers.sort((a, b) => a.full_name.localeCompare(b.full_name)) });
+      const { data: profiles, error } = await dbClient.from('profiles').select('*').order('full_name');
+      if (error) {
+        res.status(500).json({ error: error.message });
+        return;
+      }
+      res.json({ users: profiles || [] });
       return;
     }
 
@@ -1430,7 +2385,7 @@ app.post('/api/users', requireAuth, requireRole(['admin']), async (req: Authenti
       res.status(400).json({ error: 'Nama, email, kata sandi, dan role wajib diisi.' });
       return;
     }
-    if (!['admin', 'guru', 'tenaga_kependidikan'].includes(role)) {
+    if (!VALID_ROLES.includes(role)) {
       res.status(400).json({ error: 'Role tidak valid.' });
       return;
     }
@@ -1442,6 +2397,13 @@ app.post('/api/users', requireAuth, requireRole(['admin']), async (req: Authenti
     const normalizedEmail = email.trim().toLowerCase();
 
     if (useSupabase && supabaseAdmin) {
+      if (!(await hasValidServiceRoleKey())) {
+        res.status(400).json({
+          error:
+            'Fitur tambah user oleh Admin membutuhkan SUPABASE_SERVICE_ROLE_KEY (service_role secret key dari Project Settings -> API di Supabase) pada Secrets.',
+        });
+        return;
+      }
       const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
         email: normalizedEmail,
         password,
@@ -1455,7 +2417,7 @@ app.post('/api/users', requireAuth, requireRole(['admin']), async (req: Authenti
       });
 
       if (createError || !created.user) {
-        res.status(400).json({ error: createError?.message || 'Gagal membuat user di Supabase Auth.' });
+        res.status(400).json({ error: translateSupabaseAuthError(createError?.message) });
         return;
       }
 
@@ -1469,6 +2431,15 @@ app.post('/api/users', requireAuth, requireRole(['admin']), async (req: Authenti
         created_at: created.user.created_at,
       };
       await supabaseAdmin.from('profiles').upsert(profile);
+
+      // Jika role 'siswa' dan NIP cocok dengan data siswa, tautkan user_id
+      if (role === 'siswa' && nip?.trim()) {
+        await supabaseAdmin
+          .from('students')
+          .update({ user_id: created.user.id })
+          .ilike('nis', nip.trim());
+      }
+
       res.status(201).json({ user: profile });
       return;
     }
@@ -1490,6 +2461,14 @@ app.post('/api/users', requireAuth, requireRole(['admin']), async (req: Authenti
       password_hash: hashPassword(password),
     };
     db.users.push(newUser);
+
+    if (role === 'siswa' && nip?.trim()) {
+      const sIdx = db.students.findIndex((s) => s.nis.toLowerCase() === nip.trim().toLowerCase());
+      if (sIdx >= 0) {
+        db.students[sIdx] = { ...db.students[sIdx], user_id: newUser.id, account_email: normalizedEmail };
+      }
+    }
+
     writeDbFile(db);
     res.status(201).json({ user: sanitizeLocalUser(newUser) });
   } catch (err) {
@@ -1513,7 +2492,7 @@ app.patch('/api/users/:id', requireAuth, requireRole(['admin']), async (req: Aut
       res.status(400).json({ error: 'Nama, email, dan role wajib diisi.' });
       return;
     }
-    if (!['admin', 'guru', 'tenaga_kependidikan'].includes(role)) {
+    if (!VALID_ROLES.includes(role)) {
       res.status(400).json({ error: 'Role tidak valid.' });
       return;
     }
@@ -1525,6 +2504,13 @@ app.patch('/api/users/:id', requireAuth, requireRole(['admin']), async (req: Aut
     const normalizedEmail = email.trim().toLowerCase();
 
     if (useSupabase && supabaseAdmin) {
+      if (!(await hasValidServiceRoleKey())) {
+        res.status(400).json({
+          error:
+            'Sinkronisasi edit user dengan Supabase Auth membutuhkan SUPABASE_SERVICE_ROLE_KEY (service_role) yang valid pada Secrets.',
+        });
+        return;
+      }
       const updatePayload: {
         email: string;
         password?: string;
@@ -1542,7 +2528,7 @@ app.patch('/api/users/:id', requireAuth, requireRole(['admin']), async (req: Aut
 
       const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(id, updatePayload);
       if (authErr) {
-        res.status(400).json({ error: authErr.message });
+        res.status(400).json({ error: translateSupabaseAuthError(authErr.message) });
         return;
       }
 
@@ -1606,9 +2592,17 @@ app.delete('/api/users/:id', requireAuth, requireRole(['admin']), async (req: Au
     }
 
     if (useSupabase && supabaseAdmin) {
+      if (!(await hasValidServiceRoleKey())) {
+        res.status(400).json({
+          error:
+            'Hard delete hingga Supabase Authentication membutuhkan SUPABASE_SERVICE_ROLE_KEY (service_role) yang valid pada Secrets.',
+        });
+        return;
+      }
+      await supabaseAdmin.from('students').update({ user_id: null }).eq('user_id', id);
       const { error: authDeleteErr } = await supabaseAdmin.auth.admin.deleteUser(id);
       if (authDeleteErr) {
-        res.status(400).json({ error: authDeleteErr.message });
+        res.status(400).json({ error: translateSupabaseAuthError(authDeleteErr.message) });
         return;
       }
       await supabaseAdmin.from('profiles').delete().eq('id', id);
@@ -1623,12 +2617,20 @@ app.delete('/api/users/:id', requireAuth, requireRole(['admin']), async (req: Au
       return;
     }
     db.users = db.users.filter((u) => u.id !== id);
+    db.students = db.students.map((s) =>
+      s.user_id === id ? { ...s, user_id: null, account_email: null } : s
+    );
     db.employee_attendance = db.employee_attendance.filter((a) => a.user_id !== id);
     writeDbFile(db);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menghapus user.' });
   }
+});
+
+// JSON 404 untuk endpoint /api/* yang tidak terdaftar
+app.all('/api/*', (_req: Request, res: Response) => {
+  res.status(404).json({ error: 'Endpoint API tidak ditemukan.' });
 });
 
 // ============================================================================

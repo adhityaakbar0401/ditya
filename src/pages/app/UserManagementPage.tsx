@@ -191,6 +191,7 @@ export default function UserManagementPage() {
               <option value="admin">Admin</option>
               <option value="guru">Guru</option>
               <option value="tenaga_kependidikan">Tenaga Kependidikan</option>
+              <option value="siswa">Siswa</option>
             </select>
           </div>
         </div>
@@ -349,6 +350,7 @@ export default function UserManagementPage() {
                     <option value="admin">Admin</option>
                     <option value="guru">Guru</option>
                     <option value="tenaga_kependidikan">Tenaga Kependidikan</option>
+                    <option value="siswa">Siswa</option>
                   </select>
                 </div>
               </div>
@@ -356,7 +358,7 @@ export default function UserManagementPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label htmlFor="u-nip" className="block text-xs font-semibold text-slate-800">
-                    NIP / ID Karyawan
+                    NIP / NIS
                   </label>
                   <input
                     id="u-nip"

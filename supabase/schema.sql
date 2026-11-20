@@ -2,7 +2,8 @@
 -- SMK PRIMA UNGGUL - RELATIONAL SUPABASE POSTGRESQL SCHEMA
 -- ============================================================================
 -- Struktur relasional penuh yang terhubung langsung dengan Supabase Auth:
---   auth.users (1) <---> (1) public.profiles
+--   auth.users (1) <---> (1) public.profiles (admin, guru, tenaga_kependidikan, siswa)
+--   public.profiles (1) <--- (1) public.students (user_id)
 --   public.profiles (1) <--- (N) public.employee_attendance
 --   public.profiles (1) <--- (N) public.student_attendance (recorded_by)
 --   public.profiles (1) <--- (N) public.classes (homeroom_teacher_id)
@@ -21,12 +22,18 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL UNIQUE,
   full_name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin', 'guru', 'tenaga_kependidikan')),
+  role TEXT NOT NULL CHECK (role IN ('admin', 'guru', 'tenaga_kependidikan', 'siswa')),
   nip TEXT NOT NULL DEFAULT '',
   jabatan TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Jika tabel sudah pernah dibuat sebelumnya, pastikan constraint role mencakup 'siswa'
+ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+ALTER TABLE public.profiles
+  ADD CONSTRAINT profiles_role_check
+  CHECK (role IN ('admin', 'guru', 'tenaga_kependidikan', 'siswa'));
 
 -- Trigger: User pertama di auth.users otomatis mendapatkan role 'admin'
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -48,7 +55,7 @@ BEGIN
       NULLIF(NEW.raw_user_meta_data->>'role', ''),
       'tenaga_kependidikan'
     );
-    IF assigned_role NOT IN ('admin', 'guru', 'tenaga_kependidikan') THEN
+    IF assigned_role NOT IN ('admin', 'guru', 'tenaga_kependidikan', 'siswa') THEN
       assigned_role := 'tenaga_kependidikan';
     END IF;
   END IF;
@@ -92,7 +99,7 @@ BEGIN
     email = COALESCE(NEW.email, email),
     full_name = COALESCE(NULLIF(NEW.raw_user_meta_data->>'full_name', ''), full_name),
     role = CASE
-      WHEN (NEW.raw_user_meta_data->>'role') IN ('admin', 'guru', 'tenaga_kependidikan')
+      WHEN (NEW.raw_user_meta_data->>'role') IN ('admin', 'guru', 'tenaga_kependidikan', 'siswa')
       THEN (NEW.raw_user_meta_data->>'role')
       ELSE role
     END,
@@ -131,7 +138,7 @@ ON CONFLICT (code) DO UPDATE SET
   cluster = EXCLUDED.cluster;
 
 -- ----------------------------------------------------------------------------
--- 3. Tabel Master Kelas (classes) - Berelasi ke majors & profiles (Wali Kelas)
+-- 3. Tabel Master Kelas (classes)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.classes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -144,18 +151,22 @@ CREATE TABLE IF NOT EXISTS public.classes (
 );
 
 -- ----------------------------------------------------------------------------
--- 4. Tabel Data Siswa (students) - Berelasi ke classes & majors
+-- 4. Tabel Data Siswa (students) - Berelasi ke classes, majors & profiles (user_id)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.students (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   nis TEXT NOT NULL UNIQUE,
   nama TEXT NOT NULL,
+  user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE SET NULL,
   class_id UUID REFERENCES public.classes(id) ON DELETE SET NULL,
   kelas TEXT NOT NULL,
   jurusan TEXT NOT NULL DEFAULT 'TKJ' REFERENCES public.majors(code) ON UPDATE CASCADE ON DELETE RESTRICT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE public.students
+  ADD COLUMN IF NOT EXISTS user_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE SET NULL;
 
 -- Trigger otomatis membuat/menghubungkan relasi class_id saat siswa ditambah/diubah
 CREATE OR REPLACE FUNCTION public.sync_student_class_relation()
@@ -193,7 +204,7 @@ CREATE TRIGGER trg_sync_student_class
   FOR EACH ROW EXECUTE FUNCTION public.sync_student_class_relation();
 
 -- ----------------------------------------------------------------------------
--- 5. Tabel Absensi Karyawan (employee_attendance) - Relasi N:1 ke profiles
+-- 5. Tabel Absensi Karyawan (employee_attendance)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.employee_attendance (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -209,7 +220,7 @@ CREATE TABLE IF NOT EXISTS public.employee_attendance (
 );
 
 -- ----------------------------------------------------------------------------
--- 6. Tabel Absensi Siswa (student_attendance) - Relasi N:1 ke students & profiles
+-- 6. Tabel Absensi Siswa (student_attendance)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.student_attendance (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -229,6 +240,7 @@ CREATE TABLE IF NOT EXISTS public.student_attendance (
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_classes_major_code ON public.classes(major_code);
 CREATE INDEX IF NOT EXISTS idx_students_class_id ON public.students(class_id);
+CREATE INDEX IF NOT EXISTS idx_students_user_id ON public.students(user_id);
 CREATE INDEX IF NOT EXISTS idx_students_jurusan ON public.students(jurusan);
 CREATE INDEX IF NOT EXISTS idx_emp_att_date ON public.employee_attendance(date DESC);
 CREATE INDEX IF NOT EXISTS idx_emp_att_user_date ON public.employee_attendance(user_id, date DESC);
@@ -237,7 +249,7 @@ CREATE INDEX IF NOT EXISTS idx_stu_att_student_date ON public.student_attendance
 CREATE INDEX IF NOT EXISTS idx_stu_att_recorded_by ON public.student_attendance(recorded_by);
 
 -- ----------------------------------------------------------------------------
--- 8. Views Relasional (Opsional untuk Query Pelaporan Langsung)
+-- 8. Views Relasional
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE VIEW public.v_employee_attendance_detail AS
 SELECT
@@ -336,9 +348,10 @@ CREATE POLICY "Admin can manage classes"
 
 -- Policies: students
 DROP POLICY IF EXISTS "Admin and Guru can read students" ON public.students;
-CREATE POLICY "Admin and Guru can read students"
+DROP POLICY IF EXISTS "Admin, Guru, and own Student can read students" ON public.students;
+CREATE POLICY "Admin, Guru, and own Student can read students"
   ON public.students FOR SELECT
-  USING (public.current_user_role() IN ('admin', 'guru'));
+  USING (public.current_user_role() IN ('admin', 'guru') OR user_id = auth.uid());
 
 DROP POLICY IF EXISTS "Admin can manage students" ON public.students;
 CREATE POLICY "Admin can manage students"
@@ -368,3 +381,69 @@ CREATE POLICY "Admin and Guru manage student attendance"
   ON public.student_attendance FOR ALL
   USING (public.current_user_role() IN ('admin', 'guru'))
   WITH CHECK (public.current_user_role() IN ('admin', 'guru'));
+
+DROP POLICY IF EXISTS "Students read own attendance" ON public.student_attendance;
+CREATE POLICY "Students read own attendance"
+  ON public.student_attendance FOR SELECT
+  USING (
+    student_id IN (SELECT id FROM public.students WHERE user_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "Students insert own attendance" ON public.student_attendance;
+CREATE POLICY "Students insert own attendance"
+  ON public.student_attendance FOR INSERT
+  WITH CHECK (
+    student_id IN (SELECT id FROM public.students WHERE user_id = auth.uid())
+  );
+
+DROP POLICY IF EXISTS "Students update own attendance" ON public.student_attendance;
+CREATE POLICY "Students update own attendance"
+  ON public.student_attendance FOR UPDATE
+  USING (
+    student_id IN (SELECT id FROM public.students WHERE user_id = auth.uid())
+  );
+
+-- Helper RPC untuk login siswa menggunakan NIS
+CREATE OR REPLACE FUNCTION public.resolve_student_login_email(p_nis TEXT)
+RETURNS TABLE(student_id UUID, user_id UUID, email TEXT, nama TEXT, kelas TEXT)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT s.id AS student_id, s.user_id, p.email, s.nama, s.kelas
+  FROM public.students s
+  LEFT JOIN public.profiles p ON p.id = s.user_id
+  WHERE lower(s.nis) = lower(trim(p_nis))
+  LIMIT 1;
+$$;
+GRANT EXECUTE ON FUNCTION public.resolve_student_login_email(TEXT) TO anon, authenticated;
+
+-- Helper RPC untuk menautkan akun auth siswa yang baru diaktifkan ke data siswa berdasarkan NIS
+CREATE OR REPLACE FUNCTION public.activate_student_link(p_nis TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_updated INT;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN FALSE;
+  END IF;
+
+  UPDATE public.students
+  SET user_id = v_uid,
+      updated_at = NOW()
+  WHERE lower(nis) = lower(trim(p_nis))
+    AND user_id IS NULL;
+
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  RETURN v_updated > 0;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.activate_student_link(TEXT) TO authenticated;
+
+

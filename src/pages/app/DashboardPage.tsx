@@ -79,11 +79,176 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleQuickStudentCheckIn() {
+    setActionBusy(true);
+    setError('');
+    try {
+      await apiRequest('/api/attendance/students/self', {
+        method: 'POST',
+        body: JSON.stringify({ status: 'Hadir', notes: '' }),
+      });
+      await loadSummary();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mencatat kehadiran siswa.');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   if (!user) return null;
 
   const isAdmin = user.role === 'admin';
   const isGuru = user.role === 'guru';
+  const isSiswa = user.role === 'siswa';
   const myToday = summary?.myAttendanceToday || null;
+  const myStudentToday = summary?.myStudentAttendanceToday || null;
+  const myStudentProfile = summary?.myStudentProfile || null;
+
+  if (isSiswa) {
+    return (
+      <div className="space-y-6">
+        <section className="rounded-xl border border-slate-200 bg-white p-6">
+          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
+                Siswa · {summary?.today || 'Hari Ini'}
+              </p>
+              <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">
+                Selamat Datang, {user.full_name}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {myStudentProfile
+                  ? `NIS ${myStudentProfile.nis} · Kelas ${myStudentProfile.kelas} (${myStudentProfile.jurusan})`
+                  : 'Catat dan pantau kehadiran harian Anda di SMK Prima Unggul.'}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+                <p className="text-[11px] font-medium text-slate-500">Waktu WIB</p>
+                <p className="font-mono text-lg font-bold text-slate-900 tabular-nums">
+                  {nowWib || '--:--:--'}
+                </p>
+              </div>
+
+              {!myStudentToday && myStudentProfile ? (
+                <button
+                  type="button"
+                  disabled={actionBusy || loading}
+                  onClick={handleQuickStudentCheckIn}
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-5 py-3 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
+                >
+                  <LogIn className="h-4 w-4 shrink-0" />
+                  <span>{actionBusy ? 'Menyimpan...' : 'Absen Hadir Sekarang'}</span>
+                </button>
+              ) : (
+                <Link
+                  to="/app/absensi-saya"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap shrink-0"
+                >
+                  <span>Buka Absensi Saya</span>
+                  <ArrowRight className="h-4 w-4 shrink-0" />
+                </Link>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-slate-200 pt-4 text-sm">
+            <div className="flex items-center gap-2.5">
+              <span className="text-slate-500">Status Kehadiran Hari Ini:</span>
+              <StatusTag status={myStudentToday ? myStudentToday.status : 'Belum Absen'} />
+            </div>
+            {myStudentToday?.notes && (
+              <div className="text-slate-600">Catatan: {myStudentToday.notes}</div>
+            )}
+          </div>
+        </section>
+
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+            {error}
+          </div>
+        )}
+
+        {!loading && summary && (
+          <>
+            <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-5">
+                <p className="text-xs font-medium text-slate-500">Total Hadir</p>
+                <p className="mt-2 text-2xl font-extrabold text-emerald-700 tabular-nums">
+                  {summary.studentStatusCountsToday.Hadir}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-5">
+                <p className="text-xs font-medium text-slate-500">Total Izin</p>
+                <p className="mt-2 text-2xl font-extrabold text-amber-700 tabular-nums">
+                  {summary.studentStatusCountsToday.Izin}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-5">
+                <p className="text-xs font-medium text-slate-500">Total Sakit</p>
+                <p className="mt-2 text-2xl font-extrabold text-sky-700 tabular-nums">
+                  {summary.studentStatusCountsToday.Sakit}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-5">
+                <p className="text-xs font-medium text-slate-500">Total Alpha</p>
+                <p className="mt-2 text-2xl font-extrabold text-red-700 tabular-nums">
+                  {summary.studentStatusCountsToday.Alpha}
+                </p>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+              <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                <h3 className="text-sm font-bold text-slate-950">Riwayat Absensi Terbaru</h3>
+                <Link
+                  to="/app/absensi-saya"
+                  className="text-xs font-semibold text-red-700 hover:underline"
+                >
+                  Lihat Semua
+                </Link>
+              </div>
+              {summary.recentStudentLogs.length === 0 ? (
+                <div className="p-6 text-sm text-slate-500">
+                  Belum ada riwayat absensi yang tercatat untuk akun Anda.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-xs font-semibold text-slate-600 border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-2.5">Tanggal</th>
+                        <th className="px-4 py-2.5">Status</th>
+                        <th className="px-4 py-2.5">Catatan</th>
+                        <th className="px-4 py-2.5">Pencatat</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {summary.recentStudentLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-slate-50/70">
+                          <td className="px-4 py-2.5 font-mono text-xs text-slate-900 tabular-nums">
+                            {log.date}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <StatusTag status={log.status} />
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-600">{log.notes || '—'}</td>
+                          <td className="px-4 py-2.5 text-xs text-slate-500">
+                            {log.recorded_by_name || 'Sistem'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -241,7 +406,9 @@ export default function DashboardPage() {
                 <StatusTag status={myToday ? myToday.status : 'Belum Absen'} />
               </div>
               <p className="mt-2 text-xs text-slate-500">
-                {myToday?.notes ? `Catatan: ${myToday.notes}` : 'Absensi karyawan mandiri tersedia di menu Absensi Karyawan.'}
+                {myToday?.notes
+                  ? `Catatan: ${myToday.notes}`
+                  : 'Absensi karyawan mandiri tersedia di menu Absensi Karyawan.'}
               </p>
             </div>
           )}

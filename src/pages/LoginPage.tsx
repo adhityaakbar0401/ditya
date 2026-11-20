@@ -1,15 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Eye, EyeOff, Lock, Mail, ShieldCheck, User, UserCheck } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, GraduationCap, Lock, Mail, ShieldCheck, User, UserCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage() {
-  const { user, authStatus, login, registerFirstAdmin, loading: authLoading } = useAuth();
+  const {
+    user,
+    authStatus,
+    authStatusError,
+    login,
+    registerFirstAdmin,
+    activateStudentAccount,
+    refreshAuthStatus,
+    loading: authLoading,
+  } = useAuth();
   const navigate = useNavigate();
 
-  const isFirstSetup = authStatus ? !authStatus.hasUsers : false;
+  const [mode, setMode] = useState<'login' | 'activate_student' | 'first_admin'>('login');
+  const [hasInitializedMode, setHasInitializedMode] = useState(false);
 
   const [fullName, setFullName] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [nis, setNis] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nip, setNip] = useState('');
@@ -24,6 +36,19 @@ export default function LoginPage() {
     }
   }, [authLoading, user, navigate]);
 
+  useEffect(() => {
+    if (!authLoading && authStatus && !hasInitializedMode) {
+      if (!authStatus.hasUsers) {
+        setMode('first_admin');
+      } else {
+        setMode('login');
+      }
+      setHasInitializedMode(true);
+    }
+  }, [authLoading, authStatus, hasInitializedMode]);
+
+  const isFirstSetup = mode === 'first_admin';
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -37,8 +62,14 @@ export default function LoginPage() {
           nip,
           jabatan,
         });
+      } else if (mode === 'activate_student') {
+        await activateStudentAccount({
+          nis,
+          email,
+          password,
+        });
       } else {
-        await login(email, password);
+        await login(identifier, password);
       }
       navigate('/app/dashboard', { replace: true });
     } catch (err) {
@@ -77,8 +108,8 @@ export default function LoginPage() {
             SMK Prima Unggul
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-red-100">
-            Sistem absensi terpadu untuk karyawan (Admin, Guru, Tenaga Kependidikan) dan pencatatan
-            kehadiran siswa di seluruh program keahlian TKJ, DKV, AK, BC, MPLB, dan BD.
+            Sistem absensi terpadu untuk karyawan (Admin, Guru, Tenaga Kependidikan) serta siswa
+            di seluruh program keahlian TKJ, DKV, AK, BC, MPLB, dan BD.
           </p>
 
           <div className="mt-8 space-y-3 border-t border-red-700/70 pt-6 text-sm text-red-100">
@@ -88,7 +119,11 @@ export default function LoginPage() {
             </div>
             <div className="flex items-center gap-3">
               <UserCheck className="h-4 w-4 text-red-200 shrink-0" />
-              <span>Absensi karyawan mandiri & absensi siswa per kelas</span>
+              <span>Staf login dengan Email · Siswa login dengan NIS atau Email</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <GraduationCap className="h-4 w-4 text-red-200 shrink-0" />
+              <span>Siswa terdaftar dapat langsung mengaktifkan akun menggunakan NIS</span>
             </div>
           </div>
         </div>
@@ -98,7 +133,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Right Login / First Admin Form */}
+      {/* Right Login / First Admin / Activate Student Form */}
       <div className="lg:col-span-7 flex flex-col justify-center px-6 py-12 sm:px-12 lg:px-20">
         <div className="mx-auto w-full max-w-md">
           <div className="mb-8 flex items-center justify-between lg:hidden">
@@ -123,19 +158,78 @@ export default function LoginPage() {
             </div>
           ) : (
             <>
+              {!isFirstSetup && (
+                <div className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                    }}
+                    className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
+                      mode === 'login'
+                        ? 'bg-white text-red-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Masuk Portal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('activate_student');
+                      setError('');
+                    }}
+                    className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
+                      mode === 'activate_student'
+                        ? 'bg-white text-red-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Aktivasi Akun Siswa
+                  </button>
+                </div>
+              )}
+
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
-                  {isFirstSetup ? 'Inisialisasi Sistem' : 'Autentikasi Pengguna'}
+                  {isFirstSetup
+                    ? 'Inisialisasi Sistem'
+                    : mode === 'activate_student'
+                      ? 'Pendaftaran Akun Siswa'
+                      : 'Autentikasi Pengguna'}
                 </p>
                 <h2 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-950">
-                  {isFirstSetup ? 'Buat Akun Admin Pertama' : 'Masuk ke Portal Absensi'}
+                  {isFirstSetup
+                    ? 'Buat Akun Admin Pertama'
+                    : mode === 'activate_student'
+                      ? 'Aktifkan Akun Login Siswa'
+                      : 'Masuk ke Portal Absensi'}
                 </h2>
                 <p className="mt-2 text-sm leading-relaxed text-slate-600">
                   {isFirstSetup
                     ? 'Belum ada akun terdaftar. Akun pertama yang dibuat pada autentikasi akan otomatis mendapatkan peran Admin.'
-                    : 'Masukkan email dan kata sandi akun sekolah Anda untuk melanjutkan.'}
+                    : mode === 'activate_student'
+                      ? 'Masukkan NIS yang telah didaftarkan Admin pada Data Siswa beserta email dan kata sandi baru Anda.'
+                      : 'Masuk menggunakan Email (Admin, Guru, Tendik, Siswa) atau NIS khusus untuk Siswa.'}
                 </p>
               </div>
+
+              {authStatusError && (
+                <div
+                  role="alert"
+                  className="mt-5 flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-900"
+                >
+                  <span>{authStatusError}</span>
+                  <button
+                    type="button"
+                    onClick={() => refreshAuthStatus()}
+                    className="shrink-0 rounded bg-amber-100 px-2.5 py-1 font-semibold text-amber-900 hover:bg-amber-200"
+                  >
+                    Coba Lagi
+                  </button>
+                </div>
+              )}
 
               {error && (
                 <div
@@ -198,24 +292,65 @@ export default function LoginPage() {
                   </>
                 )}
 
-                <div>
-                  <label htmlFor="email" className="block text-sm font-semibold text-slate-800">
-                    Email
-                  </label>
-                  <div className="relative mt-1.5">
-                    <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      id="email"
-                      type="email"
-                      required
-                      autoComplete="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="nama@smkprimaunggul.sch.id"
-                      className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-red-700 focus:outline-none focus:ring-2 focus:ring-red-700/15"
-                    />
+                {!isFirstSetup && mode === 'activate_student' && (
+                  <div>
+                    <label htmlFor="stu-nis" className="block text-sm font-semibold text-slate-800">
+                      NIS Terdaftar
+                    </label>
+                    <div className="relative mt-1.5">
+                      <GraduationCap className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        id="stu-nis"
+                        type="text"
+                        required
+                        value={nis}
+                        onChange={(e) => setNis(e.target.value)}
+                        placeholder="Masukkan NIS siswa (misal: 20261001)"
+                        className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm font-mono text-slate-900 placeholder:text-slate-400 focus:border-red-700 focus:outline-none focus:ring-2 focus:ring-red-700/15"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {isFirstSetup || mode === 'activate_student' ? (
+                  <div>
+                    <label htmlFor="email" className="block text-sm font-semibold text-slate-800">
+                      Email
+                    </label>
+                    <div className="relative mt-1.5">
+                      <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        id="email"
+                        type="email"
+                        required
+                        autoComplete="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="nama@smkprimaunggul.sch.id"
+                        className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-red-700 focus:outline-none focus:ring-2 focus:ring-red-700/15"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label htmlFor="identifier" className="block text-sm font-semibold text-slate-800">
+                      Email atau NIS Siswa
+                    </label>
+                    <div className="relative mt-1.5">
+                      <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        id="identifier"
+                        type="text"
+                        required
+                        autoComplete="username"
+                        value={identifier}
+                        onChange={(e) => setIdentifier(e.target.value)}
+                        placeholder="nama@smkprimaunggul.sch.id atau NIS"
+                        className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-red-700 focus:outline-none focus:ring-2 focus:ring-red-700/15"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label htmlFor="password" className="block text-sm font-semibold text-slate-800">
@@ -228,7 +363,7 @@ export default function LoginPage() {
                       type={showPassword ? 'text' : 'password'}
                       required
                       minLength={6}
-                      autoComplete={isFirstSetup ? 'new-password' : 'current-password'}
+                      autoComplete={isFirstSetup || mode === 'activate_student' ? 'new-password' : 'current-password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Minimal 6 karakter"
@@ -254,15 +389,61 @@ export default function LoginPage() {
                     ? 'Memproses...'
                     : isFirstSetup
                       ? 'Buat Akun Admin & Masuk'
-                      : 'Masuk ke Portal'}
+                      : mode === 'activate_student'
+                        ? 'Aktifkan Akun & Masuk'
+                        : 'Masuk ke Portal'}
                 </button>
               </form>
 
-              {!isFirstSetup && (
+              {isFirstSetup ? (
                 <p className="mt-6 text-xs leading-relaxed text-slate-500">
-                  Pembuatan akun Guru dan Tenaga Kependidikan dilakukan oleh Administrator melalui
-                  menu User Management di dalam portal.
+                  Sudah memiliki akun terdaftar di sistem?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                    }}
+                    className="font-semibold text-red-700 hover:underline"
+                  >
+                    Masuk ke Portal
+                  </button>
+                  .
                 </p>
+              ) : (
+                mode === 'login' && (
+                  <p className="mt-6 text-xs leading-relaxed text-slate-500">
+                    Belum memiliki akun? Staf/Guru dibuatkan oleh Administrator di User Management.
+                    Siswa yang sudah terdaftar NIS-nya dapat mengaktifkan akun melalui tab{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('activate_student');
+                        setError('');
+                      }}
+                      className="font-semibold text-red-700 hover:underline"
+                    >
+                      Aktivasi Akun Siswa
+                    </button>
+                    {(!authStatus || !authStatus.hasUsers) && (
+                      <>
+                        {' '}
+                        atau{' '}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMode('first_admin');
+                            setError('');
+                          }}
+                          className="font-semibold text-red-700 hover:underline"
+                        >
+                          Buat Akun Admin Pertama
+                        </button>
+                      </>
+                    )}
+                    .
+                  </p>
+                )
               )}
             </>
           )}

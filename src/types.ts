@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'guru' | 'tenaga_kependidikan';
+export type UserRole = 'admin' | 'guru' | 'tenaga_kependidikan' | 'siswa';
 
 export type EmployeeAttendanceStatus = 'Hadir' | 'Izin' | 'Sakit' | 'Dinas Luar';
 export type StudentAttendanceStatus = 'Hadir' | 'Izin' | 'Sakit' | 'Alpha';
@@ -33,6 +33,8 @@ export interface Student {
   id: string;
   nis: string;
   nama: string;
+  user_id?: string | null;
+  account_email?: string | null;
   class_id?: string | null;
   kelas: string;
   jurusan: string;
@@ -82,6 +84,8 @@ export interface AuthStatusResponse {
 export interface DashboardSummary {
   today: string;
   myAttendanceToday: EmployeeAttendanceRecord | null;
+  myStudentProfile?: Student | null;
+  myStudentAttendanceToday?: StudentAttendanceRecord | null;
   totalEmployees: number;
   employeesPresentToday: number;
   employeesOnLeaveToday: number;

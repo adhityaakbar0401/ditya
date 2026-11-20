@@ -18,6 +18,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/app': 'Dashboard',
   '/app/dashboard': 'Dashboard',
   '/app/absensi-karyawan': 'Absensi Karyawan',
+  '/app/absensi-saya': 'Absensi Saya',
   '/app/absensi-siswa': 'Absensi Siswa',
   '/app/rekap-absensi/karyawan': 'Rekap Absensi Karyawan',
   '/app/rekap-absensi/siswa': 'Rekap Absensi Siswa',
@@ -37,6 +38,8 @@ export default function AppShell() {
 
   const isAdmin = user.role === 'admin';
   const isGuru = user.role === 'guru';
+  const isSiswa = user.role === 'siswa';
+  const isEmployee = !isSiswa;
   const canSeeStudentAttendance = isAdmin || isGuru;
   const canSeeRekapMenu = isAdmin || isGuru;
 
@@ -98,14 +101,27 @@ export default function AppShell() {
           <span>Dashboard</span>
         </NavLink>
 
-        <NavLink
-          to="/app/absensi-karyawan"
-          className={navLinkClass}
-          onClick={() => setMobileMenuOpen(false)}
-        >
-          <UserCheck className="h-4 w-4 shrink-0" />
-          <span>Absensi Karyawan</span>
-        </NavLink>
+        {isEmployee && (
+          <NavLink
+            to="/app/absensi-karyawan"
+            className={navLinkClass}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <UserCheck className="h-4 w-4 shrink-0" />
+            <span>Absensi Karyawan</span>
+          </NavLink>
+        )}
+
+        {isSiswa && (
+          <NavLink
+            to="/app/absensi-saya"
+            className={navLinkClass}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <ClipboardCheck className="h-4 w-4 shrink-0" />
+            <span>Absensi Saya</span>
+          </NavLink>
+        )}
 
         {canSeeStudentAttendance && (
           <NavLink

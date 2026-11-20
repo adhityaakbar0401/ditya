@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import AppShell from './components/AppShell';
 import DashboardPage from './pages/app/DashboardPage';
 import AbsensiKaryawanPage from './pages/app/AbsensiKaryawanPage';
+import AbsensiSayaSiswaPage from './pages/app/AbsensiSayaSiswaPage';
 import AbsensiSiswaPage from './pages/app/AbsensiSiswaPage';
 import RekapKaryawanPage from './pages/app/RekapKaryawanPage';
 import RekapSiswaPage from './pages/app/RekapSiswaPage';
@@ -66,7 +67,22 @@ export default function App() {
           >
             <Route index element={<Navigate to="/app/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="absensi-karyawan" element={<AbsensiKaryawanPage />} />
+            <Route
+              path="absensi-karyawan"
+              element={
+                <RequireRole allowed={['admin', 'guru', 'tenaga_kependidikan']}>
+                  <AbsensiKaryawanPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="absensi-saya"
+              element={
+                <RequireRole allowed={['siswa']}>
+                  <AbsensiSayaSiswaPage />
+                </RequireRole>
+              }
+            />
             <Route
               path="absensi-siswa"
               element={
