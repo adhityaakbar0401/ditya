@@ -446,4 +446,18 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.activate_student_link(TEXT) TO authenticated;
 
+-- Helper RPC untuk mengecek apakah sudah ada user terdaftar (aman terhadap RLS anon)
+CREATE OR REPLACE FUNCTION public.get_auth_bootstrap_status()
+RETURNS TABLE(has_users BOOLEAN, user_count INT)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT (COUNT(*) > 0) AS has_users, COUNT(*)::INT AS user_count
+  FROM public.profiles;
+$$;
+GRANT EXECUTE ON FUNCTION public.get_auth_bootstrap_status() TO anon, authenticated;
+
+
 

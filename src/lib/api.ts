@@ -1,3 +1,6 @@
+import { isClientSupabaseConfigured } from './supabase';
+import { executeSupabaseFallback } from './supabaseFallback';
+
 const TOKEN_KEY = 'smk_prima_unggul_token';
 
 export function getStoredToken(): string | null {
@@ -30,10 +33,18 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const res = await fetch(path, {
-    ...options,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...options,
+      headers,
+    });
+  } catch {
+    if (isClientSupabaseConfigured) {
+      return (await executeSupabaseFallback(path, options, token)) as T;
+    }
+    throw new Error('Tidak dapat terhubung ke server API. Periksa koneksi atau konfigurasi server.');
+  }
 
   const text = await res.text();
   let data: unknown = null;
@@ -45,8 +56,11 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
 
   if (!res.ok) {
     if (res.status === 404 && !data) {
+      if (isClientSupabaseConfigured) {
+        return (await executeSupabaseFallback(path, options, token)) as T;
+      }
       throw new Error(
-        `Endpoint server (${path}) tidak ditemukan (404). Pastikan Anda membuka aplikasi melalui server aktif dan muat ulang halaman.`
+        `Endpoint server (${path}) tidak ditemukan (404). Jika menggunakan Vercel, pastikan file vercel.json + api/index.ts sudah di-deploy dan Environment Variables Supabase (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY) sudah ditambahkan lalu Redeploy.`
       );
     }
     const errMsg =

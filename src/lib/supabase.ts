@@ -21,15 +21,37 @@ function isConfiguredKey(val: string): boolean {
   return val.length > 10;
 }
 
+export const isClientSupabaseConfigured =
+  isValidHttpUrl(supabaseUrl) && isConfiguredKey(supabaseAnonKey);
+
 function createSafeSupabaseClient(): SupabaseClient | null {
-  if (!isValidHttpUrl(supabaseUrl) || !isConfiguredKey(supabaseAnonKey)) {
+  if (!isClientSupabaseConfigured) {
     return null;
   }
   try {
-    return createClient(supabaseUrl, supabaseAnonKey);
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
   } catch {
     return null;
   }
 }
 
 export const supabaseClient: SupabaseClient | null = createSafeSupabaseClient();
+
+export function createAuthedSupabaseClient(token?: string | null): SupabaseClient | null {
+  if (!isClientSupabaseConfigured) return null;
+  if (!token) return supabaseClient;
+  try {
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    });
+  } catch {
+    return supabaseClient;
+  }
+}

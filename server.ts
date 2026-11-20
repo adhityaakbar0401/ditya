@@ -49,18 +49,16 @@ let useSupabase = false;
 let supabaseAdmin: SupabaseClient | null = null;
 let supabasePublic: SupabaseClient | null = null;
 
-if (
-  isValidHttpUrl(SUPABASE_URL) &&
-  isConfiguredKey(SUPABASE_ANON_KEY) &&
-  isConfiguredKey(SUPABASE_SERVICE_ROLE_KEY)
-) {
+if (isValidHttpUrl(SUPABASE_URL) && isConfiguredKey(SUPABASE_ANON_KEY)) {
   try {
-    supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
     supabasePublic = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
+    if (isConfiguredKey(SUPABASE_SERVICE_ROLE_KEY)) {
+      supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+    }
     useSupabase = true;
   } catch (err) {
     console.warn('Supabase client initialization failed, falling back to local store:', err);
@@ -122,7 +120,9 @@ interface LocalDatabase {
   student_attendance: StudentAttendanceRecord[];
 }
 
-const DATA_DIR = path.resolve(process.cwd(), '.data');
+const DATA_DIR = process.env.VERCEL
+  ? path.join('/tmp', '.data')
+  : path.resolve(process.cwd(), '.data');
 const DB_FILE = path.join(DATA_DIR, 'school-db.json');
 const TOKEN_SECRET =
   process.env.SESSION_SECRET ||
@@ -428,20 +428,32 @@ app.use(express.json({ limit: '2mb' }));
 // 1. Auth Status
 app.get('/api/auth/status', async (_req: Request, res: Response) => {
   try {
-    if (useSupabase && supabaseAdmin && supabasePublic) {
-      const { data: listData, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 100 });
-      if (!error && listData) {
-        const count = listData.users.length;
-        res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
+    if (useSupabase && supabasePublic) {
+      if (supabaseAdmin && (await hasValidServiceRoleKey())) {
+        const { data: listData, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 100 });
+        if (!error && listData) {
+          const count = listData.users.length;
+          res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
+          return;
+        }
+      }
+
+      const { data: rpcData, error: rpcErr } = await supabasePublic.rpc('get_auth_bootstrap_status');
+      if (!rpcErr && rpcData) {
+        const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        const count = Number((row as { user_count?: number } | null)?.user_count || 0);
+        const hasUsers = Boolean((row as { has_users?: boolean } | null)?.has_users || count > 0);
+        res.json({ backendMode: 'supabase', hasUsers, userCount: count });
         return;
       }
 
-      // Fallback cek jumlah profil jika auth.admin ditolak (mis. service_role key bukan JWT)
-      const profRes = await supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true });
-      if (!profRes.error) {
-        const count = profRes.count || 0;
-        res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
-        return;
+      if (supabaseAdmin) {
+        const profRes = await supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true });
+        if (!profRes.error) {
+          const count = profRes.count || 0;
+          res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
+          return;
+        }
       }
 
       const pubRes = await supabasePublic.from('profiles').select('id', { count: 'exact', head: true });
@@ -484,9 +496,9 @@ app.post('/api/auth/register-first', async (req: Request, res: Response) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (useSupabase && supabaseAdmin && supabasePublic) {
-      const serviceRoleValid = await hasValidServiceRoleKey();
-      if (serviceRoleValid) {
+    if (useSupabase && supabasePublic) {
+      const serviceRoleValid = Boolean(supabaseAdmin && (await hasValidServiceRoleKey()));
+      if (serviceRoleValid && supabaseAdmin) {
         const { data: existingList, error: listErr } = await supabaseAdmin.auth.admin.listUsers({
           page: 1,
           perPage: 10,
@@ -497,16 +509,16 @@ app.post('/api/auth/register-first', async (req: Request, res: Response) => {
           return;
         }
       } else {
-        const { count } = await supabasePublic
-          .from('profiles')
-          .select('id', { count: 'exact', head: true });
-        if ((count || 0) > 0) {
+        const { data: rpcData } = await supabasePublic.rpc('get_auth_bootstrap_status');
+        const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        const rpcCount = Number((row as { user_count?: number } | null)?.user_count || 0);
+        if (rpcCount > 0) {
           res.status(403).json({ error: 'Akun admin sudah tersedia. Hubungi admin untuk pembuatan akun baru.' });
           return;
         }
       }
 
-      if (serviceRoleValid) {
+      if (serviceRoleValid && supabaseAdmin) {
         const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
           email: normalizedEmail,
           password,
@@ -634,14 +646,14 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
     let resolvedEmail = rawIdentifier.toLowerCase();
 
-    if (useSupabase && supabasePublic && supabaseAdmin) {
+    if (useSupabase && supabasePublic) {
       // Jika input berupa NIS (tidak mengandung @), cari email siswa di relasi students -> profiles
       if (!rawIdentifier.includes('@')) {
         let foundStudentId: string | null = null;
         let foundUserId: string | null = null;
         let foundEmail: string | null = null;
 
-        if (await hasValidServiceRoleKey()) {
+        if (supabaseAdmin && (await hasValidServiceRoleKey())) {
           const { data: stu } = await supabaseAdmin
             .from('students')
             .select('id, user_id, profile:user_id(email)')
@@ -748,11 +760,11 @@ app.post('/api/auth/activate-student', async (req: Request, res: Response) => {
     const cleanNis = nis.trim();
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (useSupabase && supabaseAdmin && supabasePublic) {
-      const serviceRoleValid = await hasValidServiceRoleKey();
+    if (useSupabase && supabasePublic) {
+      const serviceRoleValid = Boolean(supabaseAdmin && (await hasValidServiceRoleKey()));
       let studentInfo: { id: string; nama: string; kelas: string; user_id: string | null } | null = null;
 
-      if (serviceRoleValid) {
+      if (serviceRoleValid && supabaseAdmin) {
         const { data: student, error: stuErr } = await supabaseAdmin
           .from('students')
           .select('*')
@@ -794,7 +806,7 @@ app.post('/api/auth/activate-student', async (req: Request, res: Response) => {
         return;
       }
 
-      if (serviceRoleValid) {
+      if (serviceRoleValid && supabaseAdmin) {
         const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
           email: normalizedEmail,
           password,
@@ -2657,7 +2669,12 @@ async function startServer(): Promise<void> {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+export { app };
+export default app;
+
+if (!process.env.VERCEL) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
