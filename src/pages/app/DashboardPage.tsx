@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Clock, LogIn, LogOut as LogOutIcon } from 'lucide-react';
+import { ArrowRight, Clock, LogIn, LogOut as LogOutIcon, ShieldCheck } from 'lucide-react';
 import { apiRequest } from '../../lib/api';
 import { formatRoleLabel, useAuth } from '../../context/AuthContext';
 import { StatusTag } from '../../components/StatusTag';
 import type { DashboardSummary } from '../../types';
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, claimAdmin } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -95,6 +95,19 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleClaimAdmin() {
+    setActionBusy(true);
+    setError('');
+    try {
+      await claimAdmin();
+      await loadSummary();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mengaktifkan peran Admin.');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   if (!user) return null;
 
   const isAdmin = user.role === 'admin';
@@ -107,13 +120,13 @@ export default function DashboardPage() {
   if (isSiswa) {
     return (
       <div className="space-y-6">
-        <section className="rounded-xl border border-slate-200 bg-white p-6">
+        <section className="rounded-xl border border-slate-200 border-t-4 border-t-red-700 bg-white p-6">
           <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
+              <span className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-900">
                 Siswa · {summary?.today || 'Hari Ini'}
-              </p>
-              <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">
+              </span>
+              <h2 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-950">
                 Selamat Datang, {user.full_name}
               </h2>
               <p className="mt-1 text-sm text-slate-600">
@@ -124,9 +137,9 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-4">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
-                <p className="text-[11px] font-medium text-slate-500">Waktu WIB</p>
-                <p className="font-mono text-lg font-bold text-slate-900 tabular-nums">
+              <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-2.5">
+                <p className="text-[11px] font-semibold text-amber-900">Waktu WIB</p>
+                <p className="font-mono text-lg font-bold text-slate-950 tabular-nums">
                   {nowWib || '--:--:--'}
                 </p>
               </div>
@@ -144,7 +157,7 @@ export default function DashboardPage() {
               ) : (
                 <Link
                   to="/app/absensi-saya"
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap shrink-0"
+                  className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-950 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0"
                 >
                   <span>Buka Absensi Saya</span>
                   <ArrowRight className="h-4 w-4 shrink-0" />
@@ -253,13 +266,13 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Greeting & Quick Self Attendance Card */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section className="rounded-xl border border-slate-200 border-t-4 border-t-red-700 bg-white p-6">
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
+            <span className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-900">
               {formatRoleLabel(user.role)} · {summary?.today || 'Hari Ini'}
-            </p>
-            <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-950">
+            </span>
+            <h2 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-950">
               Selamat Datang, {user.full_name}
             </h2>
             <p className="mt-1 text-sm text-slate-600">
@@ -268,9 +281,9 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
-              <p className="text-[11px] font-medium text-slate-500">Waktu WIB</p>
-              <p className="font-mono text-lg font-bold text-slate-900 tabular-nums">
+            <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-2.5">
+              <p className="text-[11px] font-semibold text-amber-900">Waktu WIB</p>
+              <p className="font-mono text-lg font-bold text-slate-950 tabular-nums">
                 {nowWib || '--:--:--'}
               </p>
             </div>
@@ -290,15 +303,15 @@ export default function DashboardPage() {
                 type="button"
                 disabled={actionBusy}
                 onClick={handleQuickCheckOut}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-700 bg-white px-5 py-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0"
               >
-                <LogOutIcon className="h-4 w-4 shrink-0" />
+                <LogOutIcon className="h-4 w-4 shrink-0 text-red-700" />
                 <span>{actionBusy ? 'Menyimpan...' : 'Catat Jam Pulang'}</span>
               </button>
             ) : (
               <Link
                 to="/app/absensi-karyawan"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-950 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0"
               >
                 <span>Detail Absensi Saya</span>
                 <ArrowRight className="h-4 w-4 shrink-0" />
@@ -310,18 +323,18 @@ export default function DashboardPage() {
         {/* My Today Status Bar */}
         <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-slate-200 pt-4 text-sm">
           <div className="flex items-center gap-2.5">
-            <span className="text-slate-500">Status Anda Hari Ini:</span>
+            <span className="text-slate-600">Status Anda Hari Ini:</span>
             <StatusTag status={myToday ? myToday.status : 'Belum Absen'} />
           </div>
-          <div className="flex items-center gap-2 text-slate-600">
-            <Clock className="h-4 w-4 text-slate-400" />
+          <div className="flex items-center gap-2 text-slate-700">
+            <Clock className="h-4 w-4 text-amber-600" />
             <span>Jam Masuk:</span>
             <span className="font-mono font-semibold text-slate-900 tabular-nums">
               {myToday?.check_in || '—'}
             </span>
           </div>
-          <div className="flex items-center gap-2 text-slate-600">
-            <Clock className="h-4 w-4 text-slate-400" />
+          <div className="flex items-center gap-2 text-slate-700">
+            <Clock className="h-4 w-4 text-red-700" />
             <span>Jam Pulang:</span>
             <span className="font-mono font-semibold text-slate-900 tabular-nums">
               {myToday?.check_out || '—'}
@@ -334,6 +347,32 @@ export default function DashboardPage() {
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
           {error}
         </div>
+      )}
+
+      {!loading && summary?.hasAdmin === false && !isAdmin && (
+        <section className="flex flex-col justify-between gap-4 rounded-xl border border-amber-300 bg-amber-50 p-5 sm:flex-row sm:items-center">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-800" />
+            <div>
+              <h3 className="text-sm font-bold text-amber-950">
+                Belum Ada Akun Admin di Sistem
+              </h3>
+              <p className="mt-0.5 text-xs leading-relaxed text-amber-900">
+                Akun Anda saat ini tercatat sebagai {formatRoleLabel(user.role)}. Karena belum ada
+                administrator terdaftar, Anda dapat menjadikan akun ini sebagai Admin untuk membuka
+                menu Rekap, Data Siswa, dan User Management.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            disabled={actionBusy}
+            onClick={handleClaimAdmin}
+            className="shrink-0 rounded-lg bg-red-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-red-800 disabled:opacity-60 transition-colors"
+          >
+            {actionBusy ? 'Memproses...' : 'Jadikan Akun Ini Admin'}
+          </button>
+        </section>
       )}
 
       {/* Loading Skeleton */}
@@ -354,20 +393,20 @@ export default function DashboardPage() {
         >
           {isAdmin && (
             <>
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <p className="text-xs font-medium text-slate-500">Total Karyawan Terdaftar</p>
+              <div className="rounded-xl border border-slate-200 border-t-2 border-t-amber-500 bg-white p-5">
+                <p className="text-xs font-semibold text-slate-600">Total Karyawan Terdaftar</p>
                 <p className="mt-2 text-2xl font-extrabold text-slate-950 tabular-nums">
                   {summary.totalEmployees}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">Admin, Guru & Tendik</p>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <p className="text-xs font-medium text-slate-500">Karyawan Hadir Hari Ini</p>
+              <div className="rounded-xl border border-slate-200 border-t-2 border-t-red-700 bg-white p-5">
+                <p className="text-xs font-semibold text-slate-600">Karyawan Hadir Hari Ini</p>
                 <p className="mt-2 text-2xl font-extrabold text-red-700 tabular-nums">
                   {summary.employeesPresentToday}
                 </p>
-                <p className="mt-1 text-xs text-slate-500 tabular-nums">
+                <p className="mt-1 text-xs font-medium text-amber-800 tabular-nums">
                   {summary.employeesOnLeaveToday} izin / sakit / dinas luar
                 </p>
               </div>
@@ -376,21 +415,21 @@ export default function DashboardPage() {
 
           {(isAdmin || isGuru) && (
             <>
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <p className="text-xs font-medium text-slate-500">Total Siswa Terdaftar</p>
+              <div className="rounded-xl border border-slate-200 border-t-2 border-t-amber-500 bg-white p-5">
+                <p className="text-xs font-semibold text-slate-600">Total Siswa Terdaftar</p>
                 <p className="mt-2 text-2xl font-extrabold text-slate-950 tabular-nums">
                   {summary.totalStudents}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">Seluruh kelas & jurusan</p>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-5">
-                <p className="text-xs font-medium text-slate-500">Absensi Siswa Hari Ini</p>
+              <div className="rounded-xl border border-slate-200 border-t-2 border-t-red-700 bg-white p-5">
+                <p className="text-xs font-semibold text-slate-600">Absensi Siswa Hari Ini</p>
                 <p className="mt-2 text-2xl font-extrabold text-red-700 tabular-nums">
                   {summary.studentStatusCountsToday.Hadir}{' '}
-                  <span className="text-sm font-semibold text-slate-500">Hadir</span>
+                  <span className="text-sm font-semibold text-slate-600">Hadir</span>
                 </p>
-                <p className="mt-1 text-xs text-slate-500 tabular-nums">
+                <p className="mt-1 text-xs font-medium text-slate-600 tabular-nums">
                   Izin: {summary.studentStatusCountsToday.Izin} · Sakit:{' '}
                   {summary.studentStatusCountsToday.Sakit} · Alpha:{' '}
                   {summary.studentStatusCountsToday.Alpha}
@@ -400,12 +439,12 @@ export default function DashboardPage() {
           )}
 
           {!isAdmin && (
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <p className="text-xs font-medium text-slate-500">Status Kehadiran Pribadi</p>
+            <div className="rounded-xl border border-slate-200 border-t-2 border-t-amber-500 bg-white p-5">
+              <p className="text-xs font-semibold text-slate-600">Status Kehadiran Pribadi</p>
               <div className="mt-2">
                 <StatusTag status={myToday ? myToday.status : 'Belum Absen'} />
               </div>
-              <p className="mt-2 text-xs text-slate-500">
+              <p className="mt-2 text-xs text-slate-600">
                 {myToday?.notes
                   ? `Catatan: ${myToday.notes}`
                   : 'Absensi karyawan mandiri tersedia di menu Absensi Karyawan.'}

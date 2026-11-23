@@ -149,7 +149,7 @@ export default function DataSiswaPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section className="rounded-xl border border-slate-200 border-t-4 border-t-red-700 bg-white p-6">
         <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-lg font-bold text-slate-950">Master Data Siswa</h2>
@@ -259,8 +259,10 @@ export default function DataSiswaPage() {
                     </td>
                     <td className="px-5 py-3 font-semibold text-slate-900">{student.nama}</td>
                     <td className="px-5 py-3 text-slate-700 whitespace-nowrap">{student.kelas}</td>
-                    <td className="px-5 py-3 font-mono text-xs font-semibold text-red-700">
-                      {student.jurusan}
+                    <td className="px-5 py-3">
+                      <span className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 font-mono text-xs font-bold text-amber-900">
+                        {student.jurusan}
+                      </span>
                     </td>
                     <td className="px-5 py-3 text-xs">
                       {student.user_id ? (
@@ -268,7 +270,7 @@ export default function DataSiswaPage() {
                           Aktif · {student.account_email || 'NIS'}
                         </span>
                       ) : (
-                        <span className="text-slate-400">Belum diaktifkan</span>
+                        <span className="text-slate-500">Belum diaktifkan</span>
                       )}
                     </td>
                     <td className="px-5 py-3 text-right">
@@ -276,9 +278,9 @@ export default function DataSiswaPage() {
                         <button
                           type="button"
                           onClick={() => openEditModal(student)}
-                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:border-red-300 hover:text-red-700 transition-colors"
+                          className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50/70 px-2.5 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-100 transition-colors"
                         >
-                          <Pencil className="h-3.5 w-3.5" />
+                          <Pencil className="h-3.5 w-3.5 text-amber-800" />
                           <span>Edit</span>
                         </button>
                         <button
@@ -306,7 +308,7 @@ export default function DataSiswaPage() {
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 border-t-4 border-t-red-700 bg-white p-6 shadow-xl">
             <div className="flex items-center justify-between border-b border-slate-200 pb-4">
               <h3 className="text-base font-bold text-slate-950">
                 {editingStudent ? 'Edit Data Siswa' : 'Tambah Data Siswa'}

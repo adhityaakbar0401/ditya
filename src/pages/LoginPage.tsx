@@ -82,23 +82,24 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-12 bg-white">
       {/* Left Crimson Brand Panel */}
-      <div className="relative hidden lg:flex lg:col-span-5 flex-col justify-between bg-red-800 p-10 text-white overflow-hidden">
+      <div className="relative hidden lg:flex lg:col-span-5 flex-col justify-between bg-red-800 border-r-4 border-amber-400 p-10 text-white overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center opacity-20 mix-blend-multiply"
           style={{ backgroundImage: 'url(/src/assets/images/hero_smk_campus_1795061325875.jpg)' }}
         />
-        <div className="relative z-10">
+        <div className="relative z-10 flex items-center justify-between gap-4">
           <Link
             to="/"
-            className="inline-flex items-center gap-2 text-sm font-semibold text-red-100 hover:text-white transition-colors"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-amber-200 hover:text-white transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
             <span>Kembali ke Beranda</span>
           </Link>
+          <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-md shrink-0" />
         </div>
 
         <div className="relative z-10 my-auto py-12">
-          <p className="text-xs font-semibold uppercase tracking-wider text-red-200">
+          <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
             Portal Sistem Informasi
           </p>
           <h1
@@ -112,33 +113,34 @@ export default function LoginPage() {
             di seluruh program keahlian TKJ, DKV, AK, BC, MPLB, dan BD.
           </p>
 
-          <div className="mt-8 space-y-3 border-t border-red-700/70 pt-6 text-sm text-red-100">
+          <div className="mt-8 space-y-3 border-t border-amber-400/35 pt-6 text-sm text-red-50">
             <div className="flex items-center gap-3">
-              <ShieldCheck className="h-4 w-4 text-red-200 shrink-0" />
+              <ShieldCheck className="h-4 w-4 text-amber-300 shrink-0" />
               <span>Hak akses otomatis menyesuaikan peran akun Anda</span>
             </div>
             <div className="flex items-center gap-3">
-              <UserCheck className="h-4 w-4 text-red-200 shrink-0" />
+              <UserCheck className="h-4 w-4 text-amber-300 shrink-0" />
               <span>Staf login dengan Email · Siswa login dengan NIS atau Email</span>
             </div>
             <div className="flex items-center gap-3">
-              <GraduationCap className="h-4 w-4 text-red-200 shrink-0" />
+              <GraduationCap className="h-4 w-4 text-amber-300 shrink-0" />
               <span>Siswa terdaftar dapat langsung mengaktifkan akun menggunakan NIS</span>
             </div>
           </div>
         </div>
 
-        <div className="relative z-10 text-xs text-red-200">
+        <div className="relative z-10 text-xs text-red-100">
           © {new Date().getFullYear()} SMK Prima Unggul
         </div>
       </div>
 
       {/* Right Login / First Admin / Activate Student Form */}
-      <div className="lg:col-span-7 flex flex-col justify-center px-6 py-12 sm:px-12 lg:px-20">
+      <div className="lg:col-span-7 flex flex-col justify-center bg-white px-6 py-12 sm:px-12 lg:px-20">
         <div className="mx-auto w-full max-w-md">
           <div className="mb-8 flex items-center justify-between lg:hidden">
-            <Link to="/" className="text-base font-extrabold text-red-700">
-              SMK Prima Unggul
+            <Link to="/" className="inline-flex items-center gap-2 text-base font-extrabold text-red-700">
+              <img src="/favicon.svg" alt="" className="h-6 w-6 rounded shrink-0" />
+              <span>SMK Prima Unggul</span>
             </Link>
             <Link
               to="/"
@@ -159,7 +161,7 @@ export default function LoginPage() {
           ) : (
             <>
               <div
-                className={`mb-6 grid gap-1 rounded-lg bg-slate-100 p-1 ${
+                className={`mb-6 grid gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 ${
                   !authStatus || !authStatus.hasUsers ? 'grid-cols-3' : 'grid-cols-2'
                 }`}
               >
@@ -171,7 +173,7 @@ export default function LoginPage() {
                   }}
                   className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
                     mode === 'login'
-                      ? 'bg-white text-red-700 shadow-xs'
+                      ? 'bg-white text-red-700 border-b-2 border-amber-500 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -185,7 +187,7 @@ export default function LoginPage() {
                   }}
                   className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
                     mode === 'activate_student'
-                      ? 'bg-white text-red-700 shadow-xs'
+                      ? 'bg-white text-red-700 border-b-2 border-amber-500 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -200,7 +202,7 @@ export default function LoginPage() {
                     }}
                     className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
                       mode === 'first_admin'
-                        ? 'bg-white text-red-700 shadow-xs'
+                        ? 'bg-white text-red-700 border-b-2 border-amber-500 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -210,14 +212,14 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
+                <p className="inline-flex items-center rounded bg-amber-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-900 border border-amber-200">
                   {isFirstSetup
                     ? 'Inisialisasi Sistem'
                     : mode === 'activate_student'
                       ? 'Pendaftaran Akun Siswa'
                       : 'Autentikasi Pengguna'}
                 </p>
-                <h2 className="mt-2 text-2xl font-extrabold tracking-tight text-slate-950">
+                <h2 className="mt-2.5 text-2xl font-extrabold tracking-tight text-slate-950">
                   {isFirstSetup
                     ? 'Buat Akun Admin Pertama'
                     : mode === 'activate_student'

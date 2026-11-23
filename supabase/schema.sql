@@ -58,6 +58,11 @@ BEGIN
     IF assigned_role NOT IN ('admin', 'guru', 'tenaga_kependidikan', 'siswa') THEN
       assigned_role := 'tenaga_kependidikan';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE role = 'admin')
+       AND assigned_role <> 'siswa'
+       AND NULLIF(NEW.raw_user_meta_data->>'role', '') IS NULL THEN
+      assigned_role := 'admin';
+    END IF;
   END IF;
 
   INSERT INTO public.profiles (id, email, full_name, role, nip, jabatan)
@@ -463,9 +468,10 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.activate_student_link(TEXT) TO authenticated;
 
--- Helper RPC untuk mengecek apakah sudah ada user terdaftar (memeriksa profiles maupun auth.users)
+-- Helper RPC untuk mengecek status user & apakah sudah ada admin (memeriksa profiles maupun auth.users)
+DROP FUNCTION IF EXISTS public.get_auth_bootstrap_status();
 CREATE OR REPLACE FUNCTION public.get_auth_bootstrap_status()
-RETURNS TABLE(has_users BOOLEAN, user_count INT)
+RETURNS TABLE(has_users BOOLEAN, user_count INT, has_admin BOOLEAN)
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
@@ -474,11 +480,13 @@ AS $$
   WITH counts AS (
     SELECT
       (SELECT COUNT(*)::INT FROM public.profiles) AS profile_count,
-      (SELECT COUNT(*)::INT FROM auth.users) AS auth_count
+      (SELECT COUNT(*)::INT FROM auth.users) AS auth_count,
+      EXISTS (SELECT 1 FROM public.profiles WHERE role = 'admin') AS admin_exists
   )
   SELECT
     (profile_count > 0 OR auth_count > 0) AS has_users,
-    GREATEST(profile_count, auth_count) AS user_count
+    GREATEST(profile_count, auth_count) AS user_count,
+    admin_exists AS has_admin
   FROM counts;
 $$;
 GRANT EXECUTE ON FUNCTION public.get_auth_bootstrap_status() TO anon, authenticated;
@@ -495,14 +503,25 @@ DECLARE
   v_user auth.users%ROWTYPE;
   v_existing public.profiles%ROWTYPE;
   v_count INT;
+  v_has_admin BOOLEAN;
   v_role TEXT;
 BEGIN
   IF v_uid IS NULL THEN
     RETURN;
   END IF;
 
+  SELECT EXISTS (SELECT 1 FROM public.profiles WHERE role = 'admin') INTO v_has_admin;
+
   SELECT * INTO v_existing FROM public.profiles WHERE id = v_uid;
   IF FOUND THEN
+    IF NOT v_has_admin
+       AND v_existing.role <> 'siswa'
+       AND v_existing.id = (SELECT id FROM public.profiles ORDER BY created_at ASC LIMIT 1) THEN
+      UPDATE public.profiles
+      SET role = 'admin', updated_at = NOW()
+      WHERE id = v_uid
+      RETURNING * INTO v_existing;
+    END IF;
     RETURN NEXT v_existing;
     RETURN;
   END IF;
@@ -513,7 +532,7 @@ BEGIN
   END IF;
 
   SELECT COUNT(*) INTO v_count FROM public.profiles;
-  IF v_count = 0 THEN
+  IF v_count = 0 OR NOT v_has_admin THEN
     v_role := 'admin';
   ELSE
     v_role := COALESCE(NULLIF(v_user.raw_user_meta_data->>'role', ''), 'tenaga_kependidikan');
@@ -542,6 +561,49 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.sync_my_profile() TO authenticated;
 
+-- Helper RPC aman: mempromosikan akun staf yang sedang login menjadi admin HANYA JIKA belum ada admin sama sekali
+CREATE OR REPLACE FUNCTION public.claim_admin_if_none()
+RETURNS SETOF public.profiles
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_existing public.profiles%ROWTYPE;
+BEGIN
+  IF v_uid IS NULL THEN
+    RAISE EXCEPTION 'Sesi tidak valid.';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE role = 'admin') THEN
+    RAISE EXCEPTION 'Akun Admin sudah tersedia di sistem.';
+  END IF;
+
+  PERFORM * FROM public.sync_my_profile();
+  SELECT * INTO v_existing FROM public.profiles WHERE id = v_uid;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Profil pengguna tidak ditemukan.';
+  END IF;
+
+  IF v_existing.role = 'siswa' THEN
+    RAISE EXCEPTION 'Akun siswa tidak dapat dijadikan Admin.';
+  END IF;
+
+  UPDATE public.profiles
+  SET role = 'admin',
+      jabatan = CASE WHEN jabatan = '' THEN 'Administrator Sekolah' ELSE jabatan END,
+      updated_at = NOW()
+  WHERE id = v_uid
+  RETURNING * INTO v_existing;
+
+  RETURN NEXT v_existing;
+  RETURN;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.claim_admin_if_none() TO authenticated;
+
 -- Backfill user yang sudah ada di auth.users sebelum trigger dibuat (user paling awal otomatis menjadi admin jika belum ada admin)
 INSERT INTO public.profiles (id, email, full_name, role, nip, jabatan)
 SELECT
@@ -560,6 +622,13 @@ SELECT
   COALESCE(u.raw_user_meta_data->>'jabatan', '')
 FROM auth.users u
 WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = u.id);
+
+-- Jika sudah ada user di public.profiles namun belum ada satupun yang berperan admin, promosikan user paling awal
+UPDATE public.profiles
+SET role = 'admin',
+    updated_at = NOW()
+WHERE id = (SELECT id FROM public.profiles ORDER BY created_at ASC LIMIT 1)
+  AND NOT EXISTS (SELECT 1 FROM public.profiles WHERE role = 'admin');
 
 
 

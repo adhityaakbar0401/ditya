@@ -95,13 +95,14 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white text-slate-900">
       {/* Top Bar Contract: Exact 3 Zones */}
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
+      <header className="sticky top-0 z-40 border-t-2 border-t-amber-500 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-8 px-6 py-4">
           <Link
             to="/"
-            className="text-lg font-extrabold tracking-tight text-red-700 whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2.5 text-lg font-extrabold tracking-tight text-red-700 whitespace-nowrap shrink-0"
           >
-            SMK Prima Unggul
+            <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-md shrink-0" />
+            <span>SMK Prima Unggul</span>
           </Link>
 
           <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600">
@@ -144,16 +145,19 @@ export default function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section id="profil" className="border-b border-slate-200 bg-slate-50/70">
+      <section id="profil" className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-6 py-14 lg:py-20">
           <div className="grid grid-cols-1 items-stretch gap-10 lg:grid-cols-12">
             <div className="flex flex-col justify-center lg:col-span-6">
-              <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
-                Sekolah Menengah Kejuruan · Terakreditasi Unggul
-              </p>
+              <div className="inline-flex w-fit items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1">
+                <span className="h-2 w-2 rounded-full bg-amber-500" />
+                <p className="text-xs font-bold uppercase tracking-wider text-amber-900">
+                  Sekolah Menengah Kejuruan · Terakreditasi Unggul
+                </p>
+              </div>
 
               <h1
-                className="mt-3 font-extrabold tracking-tight text-slate-950"
+                className="mt-4 font-extrabold tracking-tight text-slate-950"
                 style={{ fontSize: 'clamp(2.25rem, 4vw, 3.5rem)', lineHeight: 1.1, textWrap: 'balance' }}
               >
                 Mencetak Lulusan Vokasi Siap Kerja, Disiplin, dan Berkarakter.
@@ -169,14 +173,14 @@ export default function LandingPage() {
               <div className="mt-8 flex flex-wrap items-center gap-4">
                 <Link
                   to={user ? '/app/dashboard' : '/login'}
-                  className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-6 py-3 text-sm font-semibold text-white hover:bg-red-800 transition-colors whitespace-nowrap shrink-0"
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-6 py-3 text-sm font-semibold text-white hover:bg-red-800 transition-colors whitespace-nowrap shrink-0 shadow-xs"
                 >
                   <span>{user ? 'Masuk ke Aplikasi' : 'Masuk Portal Absensi'}</span>
                   <ArrowRight className="h-4 w-4 shrink-0" />
                 </Link>
                 <a
                   href="#jurusan"
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap shrink-0"
+                  className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-950 hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0"
                 >
                   Lihat Program Keahlian
                 </a>
@@ -191,8 +195,10 @@ export default function LandingPage() {
                   fallbackTitle="Kampus SMK Prima Unggul"
                   className="h-full w-full object-cover"
                 />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/80 via-slate-950/30 to-transparent p-6">
-                  <p className="text-xs font-semibold text-red-200">Lingkungan Belajar Modern</p>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/85 via-slate-950/40 to-transparent p-6">
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                    Lingkungan Belajar Modern
+                  </p>
                   <p className="mt-1 text-sm font-medium text-white">
                     Kampus terpadu dengan laboratorium jaringan, studio penyiaran, studio kreatif, dan ruang praktik bisnis.
                   </p>
@@ -202,17 +208,17 @@ export default function LandingPage() {
           </div>
 
           {/* 4-Column Full-Width Strip Below Hero Split */}
-          <div className="mt-12 grid grid-cols-2 divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          <div className="mt-12 grid grid-cols-2 divide-y divide-slate-200 rounded-xl border border-slate-200 border-t-2 border-t-amber-500 bg-white sm:grid-cols-4 sm:divide-x sm:divide-y-0">
             <div className="p-6">
               <p className="text-2xl font-extrabold text-red-700 tabular-nums">3 Bidang</p>
               <p className="mt-1 text-sm font-medium text-slate-600">Rumpun Keahlian Utama</p>
             </div>
             <div className="p-6">
-              <p className="text-2xl font-extrabold text-slate-950 tabular-nums">6 Jurusan</p>
+              <p className="text-2xl font-extrabold text-amber-700 tabular-nums">6 Jurusan</p>
               <p className="mt-1 text-sm font-medium text-slate-600">TKJ · DKV · AK · BC · MPLB · BD</p>
             </div>
             <div className="p-6">
-              <p className="text-2xl font-extrabold text-slate-950 tabular-nums">3 Peran</p>
+              <p className="text-2xl font-extrabold text-red-700 tabular-nums">3 Peran</p>
               <p className="mt-1 text-sm font-medium text-slate-600">Admin, Guru & Tenaga Kependidikan</p>
             </div>
             <div className="p-6">
@@ -249,7 +255,7 @@ export default function LandingPage() {
             >
               <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end">
                 <div>
-                  <p className="font-mono text-xs font-semibold text-red-700 tabular-nums">
+                  <p className="font-mono text-xs font-bold text-amber-700 tabular-nums">
                     {group.index}. Rumpun Keahlian
                   </p>
                   <h3 className="mt-1 text-xl font-bold text-slate-950">{group.cluster}</h3>
@@ -269,13 +275,17 @@ export default function LandingPage() {
                 {group.majors.map((major) => (
                   <div
                     key={major.code}
-                    className="rounded-lg border border-slate-200 bg-slate-50/60 p-5"
+                    className="rounded-lg border border-slate-200 border-t-2 border-t-red-700 bg-white p-5 hover:border-amber-300 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <span className="font-mono text-sm font-bold text-red-700">{major.code}</span>
-                      <span className="text-xs font-medium text-slate-500">Program 3 Tahun</span>
+                      <span className="rounded bg-red-50 px-2 py-0.5 font-mono text-sm font-bold text-red-700 border border-red-200">
+                        {major.code}
+                      </span>
+                      <span className="rounded bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900 border border-amber-200">
+                        Program 3 Tahun
+                      </span>
                     </div>
-                    <h4 className="mt-2 text-base font-bold text-slate-900">{major.name}</h4>
+                    <h4 className="mt-3 text-base font-bold text-slate-900">{major.name}</h4>
                     <p className="mt-2 text-sm leading-relaxed text-slate-600">{major.desc}</p>
                   </div>
                 ))}
@@ -375,11 +385,11 @@ export default function LandingPage() {
         </div>
 
         <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-700 border border-red-100">
+          <div className="rounded-xl border border-slate-200 border-t-2 border-t-red-700 bg-white p-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-700 border border-red-200">
               <Monitor className="h-5 w-5" />
             </div>
-            <p className="mt-4 font-mono text-xs font-semibold text-red-700">01. Peran Admin</p>
+            <p className="mt-4 font-mono text-xs font-bold text-amber-700">01. Peran Admin</p>
             <h3 className="mt-1 text-lg font-bold text-slate-950">Administrator Sekolah</h3>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               <li className="flex items-start gap-2">
@@ -397,33 +407,33 @@ export default function LandingPage() {
             </ul>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-700 border border-red-100">
+          <div className="rounded-xl border border-slate-200 border-t-2 border-t-amber-500 bg-white p-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
               <GraduationCap className="h-5 w-5" />
             </div>
-            <p className="mt-4 font-mono text-xs font-semibold text-red-700">02. Peran Guru</p>
+            <p className="mt-4 font-mono text-xs font-bold text-red-700">02. Peran Guru</p>
             <h3 className="mt-1 text-lg font-bold text-slate-950">Dewan Guru Pengajar</h3>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               <li className="flex items-start gap-2">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <span>Melakukan absensi karyawan mandiri (jam masuk, pulang, atau izin).</span>
               </li>
               <li className="flex items-start gap-2">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <span>Mencatat kehadiran siswa per kelas dan tanggal di menu Absensi Siswa.</span>
               </li>
               <li className="flex items-start gap-2">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-red-700" />
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                 <span>Melihat dan mengekspor rekapitulasi absensi siswa.</span>
               </li>
             </ul>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-700 border border-red-100">
+          <div className="rounded-xl border border-slate-200 border-t-2 border-t-red-700 bg-white p-6">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-700 border border-red-200">
               <Users className="h-5 w-5" />
             </div>
-            <p className="mt-4 font-mono text-xs font-semibold text-red-700">03. Peran Tendik</p>
+            <p className="mt-4 font-mono text-xs font-bold text-amber-700">03. Peran Tendik</p>
             <h3 className="mt-1 text-lg font-bold text-slate-950">Tenaga Kependidikan</h3>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               <li className="flex items-start gap-2">
@@ -444,22 +454,28 @@ export default function LandingPage() {
       </section>
 
       {/* Quiet Footer */}
-      <footer className="border-t border-slate-200 bg-slate-950 text-slate-300">
+      <footer className="border-t border-slate-200 bg-white text-slate-700">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-6 px-6 py-10 sm:flex-row sm:items-center">
-          <div>
-            <p className="text-base font-bold text-white">SMK Prima Unggul</p>
-            <p className="mt-1 text-xs text-slate-400">
-              Kompetensi Keahlian: TKJ · DKV · AK · BC · MPLB · BD
-            </p>
+          <div className="flex items-center gap-3">
+            <img src="/favicon.svg" alt="" className="h-8 w-8 rounded-md shrink-0" />
+            <div>
+              <p className="text-base font-extrabold text-red-700">SMK Prima Unggul</p>
+              <p className="mt-0.5 text-xs font-medium text-slate-600">
+                Kompetensi Keahlian: TKJ · DKV · AK · BC · MPLB · BD
+              </p>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-6 text-sm">
-            <a href="#profil" className="hover:text-white transition-colors">
+          <div className="flex flex-wrap items-center gap-6 text-sm font-medium">
+            <a href="#profil" className="text-slate-600 hover:text-red-700 transition-colors">
               Profil Sekolah
             </a>
-            <a href="#jurusan" className="hover:text-white transition-colors">
+            <a href="#jurusan" className="text-slate-600 hover:text-red-700 transition-colors">
               Jurusan
             </a>
-            <Link to="/login" className="font-semibold text-red-400 hover:text-red-300 transition-colors">
+            <Link
+              to="/login"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3.5 py-1.5 font-semibold text-amber-900 hover:bg-amber-100 transition-colors"
+            >
               Login Portal
             </Link>
           </div>

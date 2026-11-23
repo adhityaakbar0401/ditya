@@ -79,10 +79,12 @@ export interface AuthStatusResponse {
   backendMode: 'supabase' | 'local';
   hasUsers: boolean;
   userCount: number;
+  hasAdmin?: boolean;
 }
 
 export interface DashboardSummary {
   today: string;
+  hasAdmin?: boolean;
   myAttendanceToday: EmployeeAttendanceRecord | null;
   myStudentProfile?: Student | null;
   myStudentAttendanceToday?: StudentAttendanceRecord | null;

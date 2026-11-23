@@ -92,7 +92,7 @@ export default function RekapSiswaPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section className="rounded-xl border border-slate-200 border-t-4 border-t-red-700 bg-white p-6">
         <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-lg font-bold text-slate-950">Rekap Absensi Siswa</h2>
@@ -104,9 +104,9 @@ export default function RekapSiswaPage() {
             type="button"
             disabled={filtered.length === 0}
             onClick={exportCsv}
-            className="inline-flex items-center gap-2 rounded-lg border border-red-700 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
           >
-            <Download className="h-4 w-4 shrink-0" />
+            <Download className="h-4 w-4 shrink-0 text-amber-800" />
             <span>Ekspor CSV</span>
           </button>
         </div>
@@ -190,21 +190,21 @@ export default function RekapSiswaPage() {
         </div>
 
         {/* Summary Strip */}
-        <div className="mt-5 grid grid-cols-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-slate-50 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+        <div className="mt-5 grid grid-cols-2 divide-y divide-amber-200/70 rounded-lg border border-amber-200 bg-amber-50/40 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
           <div className="p-3.5">
-            <p className="text-xs text-slate-500">Hadir</p>
+            <p className="text-xs font-medium text-slate-600">Hadir</p>
             <p className="mt-0.5 text-xl font-extrabold text-emerald-700 tabular-nums">{stats.Hadir}</p>
           </div>
           <div className="p-3.5">
-            <p className="text-xs text-slate-500">Izin</p>
-            <p className="mt-0.5 text-xl font-extrabold text-amber-700 tabular-nums">{stats.Izin}</p>
+            <p className="text-xs font-medium text-slate-600">Izin</p>
+            <p className="mt-0.5 text-xl font-extrabold text-amber-800 tabular-nums">{stats.Izin}</p>
           </div>
           <div className="p-3.5">
-            <p className="text-xs text-slate-500">Sakit</p>
-            <p className="mt-0.5 text-xl font-extrabold text-sky-700 tabular-nums">{stats.Sakit}</p>
+            <p className="text-xs font-medium text-slate-600">Sakit</p>
+            <p className="mt-0.5 text-xl font-extrabold text-sky-800 tabular-nums">{stats.Sakit}</p>
           </div>
           <div className="p-3.5">
-            <p className="text-xs text-slate-500">Alpha</p>
+            <p className="text-xs font-medium text-slate-600">Alpha</p>
             <p className="mt-0.5 text-xl font-extrabold text-red-700 tabular-nums">{stats.Alpha}</p>
           </div>
         </div>

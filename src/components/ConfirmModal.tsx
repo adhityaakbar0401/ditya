@@ -29,7 +29,7 @@ export function ConfirmModal({
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-xl">
+      <div className="w-full max-w-md rounded-xl border border-slate-200 border-t-4 border-t-amber-500 bg-white p-6 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 border border-red-200 text-red-700">

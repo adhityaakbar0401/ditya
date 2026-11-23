@@ -87,7 +87,7 @@ export default function AbsensiSayaSiswaPage() {
   return (
     <div className="space-y-6">
       {/* Self Attendance Form Card */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section className="rounded-xl border border-slate-200 border-t-4 border-t-red-700 bg-white p-6">
         <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-center">
           <div>
             <h2 className="text-lg font-bold text-slate-950">Absensi Mandiri Siswa</h2>
@@ -97,9 +97,9 @@ export default function AbsensiSayaSiswaPage() {
                 : `Tanggal ${today || 'Hari Ini'}`}
             </p>
           </div>
-          <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2">
-            <Clock className="h-4 w-4 text-red-700" />
-            <span className="font-mono text-base font-bold text-slate-900 tabular-nums">
+          <div className="flex items-center gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2">
+            <Clock className="h-4 w-4 text-amber-700" />
+            <span className="font-mono text-base font-bold text-slate-950 tabular-nums">
               {nowWib || '--:--:--'} WIB
             </span>
           </div>
@@ -189,7 +189,7 @@ export default function AbsensiSayaSiswaPage() {
       <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex flex-col justify-between gap-3 border-b border-slate-200 px-6 py-4 sm:flex-row sm:items-center">
           <h3 className="text-base font-bold text-slate-950">Riwayat Kehadiran Saya</h3>
-          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
             {['all', 'Hadir', 'Izin', 'Sakit', 'Alpha'].map((st) => (
               <button
                 key={st}
@@ -197,7 +197,7 @@ export default function AbsensiSayaSiswaPage() {
                 onClick={() => setFilterStatus(st)}
                 className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap ${
                   filterStatus === st
-                    ? 'bg-white text-red-700 shadow-xs'
+                    ? 'bg-white text-red-700 border-b-2 border-amber-500 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >

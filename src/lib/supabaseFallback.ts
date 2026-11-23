@@ -144,7 +144,13 @@ export async function executeSupabaseFallback(
       const row = Array.isArray(data) ? data[0] : data;
       const count = Number((row as { user_count?: number } | null)?.user_count || 0);
       const hasUsers = Boolean((row as { has_users?: boolean } | null)?.has_users || count > 0);
-      return { backendMode: 'supabase', hasUsers, userCount: count };
+      const rawHasAdmin = (row as { has_admin?: boolean } | null)?.has_admin;
+      return {
+        backendMode: 'supabase',
+        hasUsers,
+        userCount: count,
+        hasAdmin: typeof rawHasAdmin === 'boolean' ? rawHasAdmin : undefined,
+      };
     }
     const { count, error: countErr } = await supabaseClient
       .from('profiles')
@@ -153,7 +159,7 @@ export async function executeSupabaseFallback(
       const total = count || 0;
       return { backendMode: 'supabase', hasUsers: total > 0, userCount: total };
     }
-    return { backendMode: 'supabase', hasUsers: false, userCount: 0 };
+    return { backendMode: 'supabase', hasUsers: false, userCount: 0, hasAdmin: false };
   }
 
   // 2. POST /api/auth/register-first
@@ -330,9 +336,32 @@ export async function executeSupabaseFallback(
     throw new Error('Sesi tidak valid atau telah kedaluwarsa.');
   }
 
-  // 5. GET /api/auth/me
+  // 5. GET /api/auth/me & POST /api/auth/claim-admin
   if (pathname === '/api/auth/me' && method === 'GET') {
     return { user: currentUser };
+  }
+
+  if (pathname === '/api/auth/claim-admin' && method === 'POST') {
+    if (currentUser.role === 'admin') {
+      return { user: currentUser };
+    }
+    if (currentUser.role === 'siswa') {
+      throw new Error('Akun siswa tidak dapat dijadikan Admin.');
+    }
+    const { data: rpcRows, error: rpcErr } = await dbClient.rpc('claim_admin_if_none');
+    if (rpcErr) {
+      if (rpcErr.message.toLowerCase().includes('claim_admin_if_none')) {
+        throw new Error(
+          'Fungsi claim_admin_if_none belum aktif di Supabase. Jalankan ulang supabase/schema.sql di SQL Editor Supabase.'
+        );
+      }
+      throw new Error(rpcErr.message);
+    }
+    const updated = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+    if (!updated) {
+      throw new Error('Gagal mempromosikan akun ke Admin.');
+    }
+    return { user: updated };
   }
 
   // 6. GET /api/majors
@@ -500,8 +529,20 @@ export async function executeSupabaseFallback(
             student_jurusan: r.student?.jurusan || '',
           }));
 
+    let hasAdmin = currentUser.role === 'admin';
+    if (!hasAdmin) {
+      const { data: rpcStatus } = await supabaseClient.rpc('get_auth_bootstrap_status');
+      const statusRow = Array.isArray(rpcStatus) ? rpcStatus[0] : rpcStatus;
+      if (typeof (statusRow as { has_admin?: boolean } | null)?.has_admin === 'boolean') {
+        hasAdmin = Boolean((statusRow as { has_admin?: boolean }).has_admin);
+      } else {
+        hasAdmin = true;
+      }
+    }
+
     return {
       today,
+      hasAdmin,
       myAttendanceToday,
       totalEmployees: profilesCountRes.count || 0,
       employeesPresentToday,

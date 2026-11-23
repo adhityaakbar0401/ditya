@@ -439,10 +439,18 @@ app.get('/api/auth/status', async (_req: Request, res: Response) => {
   try {
     if (useSupabase && supabasePublic) {
       if (supabaseAdmin && (await hasValidServiceRoleKey())) {
-        const { data: listData, error } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 100 });
+        const [{ data: listData, error }, { count: adminCount }] = await Promise.all([
+          supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 100 }),
+          supabaseAdmin.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'admin'),
+        ]);
         if (!error && listData) {
           const count = listData.users.length;
-          res.json({ backendMode: 'supabase', hasUsers: count > 0, userCount: count });
+          res.json({
+            backendMode: 'supabase',
+            hasUsers: count > 0,
+            userCount: count,
+            hasAdmin: (adminCount || 0) > 0,
+          });
           return;
         }
       }
@@ -452,7 +460,13 @@ app.get('/api/auth/status', async (_req: Request, res: Response) => {
         const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
         const count = Number((row as { user_count?: number } | null)?.user_count || 0);
         const hasUsers = Boolean((row as { has_users?: boolean } | null)?.has_users || count > 0);
-        res.json({ backendMode: 'supabase', hasUsers, userCount: count });
+        const rawHasAdmin = (row as { has_admin?: boolean } | null)?.has_admin;
+        res.json({
+          backendMode: 'supabase',
+          hasUsers,
+          userCount: count,
+          hasAdmin: typeof rawHasAdmin === 'boolean' ? rawHasAdmin : undefined,
+        });
         return;
       }
 
@@ -472,12 +486,17 @@ app.get('/api/auth/status', async (_req: Request, res: Response) => {
         return;
       }
 
-      res.json({ backendMode: 'supabase', hasUsers: false, userCount: 0 });
+      res.json({ backendMode: 'supabase', hasUsers: false, userCount: 0, hasAdmin: false });
       return;
     }
 
     const db = ensureDbFile();
-    res.json({ backendMode: 'local', hasUsers: db.users.length > 0, userCount: db.users.length });
+    res.json({
+      backendMode: 'local',
+      hasUsers: db.users.length > 0,
+      userCount: db.users.length,
+      hasAdmin: db.users.some((u) => u.role === 'admin'),
+    });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Server error' });
   }
@@ -953,9 +972,90 @@ app.post('/api/auth/activate-student', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Current User
+// 5. Current User & Klaim Admin Awal (hanya jika belum ada Admin sama sekali)
 app.get('/api/auth/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   res.json({ user: req.user });
+});
+
+app.post('/api/auth/claim-admin', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const currentUser = req.user!;
+    if (currentUser.role === 'admin') {
+      res.json({ user: currentUser });
+      return;
+    }
+    if (currentUser.role === 'siswa') {
+      res.status(403).json({ error: 'Akun siswa tidak dapat dijadikan Admin.' });
+      return;
+    }
+
+    if (useSupabase && supabasePublic) {
+      if (supabaseAdmin && (await hasValidServiceRoleKey())) {
+        const { count: adminCount } = await supabaseAdmin
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .eq('role', 'admin');
+        if ((adminCount || 0) > 0) {
+          res.status(403).json({ error: 'Akun Admin sudah tersedia di sistem.' });
+          return;
+        }
+        const { data: updated, error } = await supabaseAdmin
+          .from('profiles')
+          .update({
+            role: 'admin',
+            jabatan: currentUser.jabatan || 'Administrator Sekolah',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', currentUser.id)
+          .select()
+          .single();
+        if (error || !updated) {
+          res.status(400).json({ error: error?.message || 'Gagal memperbarui peran Admin.' });
+          return;
+        }
+        res.json({ user: updated });
+        return;
+      }
+
+      const userClient = req.accessToken ? createUserSupabaseClient(req.accessToken) : null;
+      if (!userClient) {
+        res.status(401).json({ error: 'Sesi pengguna tidak valid.' });
+        return;
+      }
+      const { data: rpcRows, error: rpcErr } = await userClient.rpc('claim_admin_if_none');
+      if (rpcErr) {
+        res.status(400).json({ error: rpcErr.message });
+        return;
+      }
+      const updated = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+      if (!updated) {
+        res.status(400).json({ error: 'Gagal mempromosikan akun ke Admin.' });
+        return;
+      }
+      res.json({ user: updated });
+      return;
+    }
+
+    const db = ensureDbFile();
+    if (db.users.some((u) => u.role === 'admin')) {
+      res.status(403).json({ error: 'Akun Admin sudah tersedia di sistem.' });
+      return;
+    }
+    const idx = db.users.findIndex((u) => u.id === currentUser.id);
+    if (idx < 0) {
+      res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
+      return;
+    }
+    db.users[idx] = {
+      ...db.users[idx],
+      role: 'admin',
+      jabatan: db.users[idx].jabatan || 'Administrator Sekolah',
+    };
+    writeDbFile(db);
+    res.json({ user: sanitizeLocalUser(db.users[idx]) });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal klaim peran Admin.' });
+  }
 });
 
 // 6. Master Jurusan & Kelas Relasional
@@ -1212,8 +1312,20 @@ app.get('/api/dashboard/summary', requireAuth, async (req: AuthenticatedRequest,
               student_jurusan: r.student?.jurusan || '',
             }));
 
+      let hasAdmin = currentUser.role === 'admin';
+      if (!hasAdmin && supabasePublic) {
+        const { data: rpcStatus } = await supabasePublic.rpc('get_auth_bootstrap_status');
+        const statusRow = Array.isArray(rpcStatus) ? rpcStatus[0] : rpcStatus;
+        if (typeof (statusRow as { has_admin?: boolean } | null)?.has_admin === 'boolean') {
+          hasAdmin = Boolean((statusRow as { has_admin?: boolean }).has_admin);
+        } else {
+          hasAdmin = true;
+        }
+      }
+
       res.json({
         today,
+        hasAdmin,
         myAttendanceToday,
         totalEmployees: profilesCountRes.count || 0,
         employeesPresentToday,
@@ -1276,6 +1388,7 @@ app.get('/api/dashboard/summary', requireAuth, async (req: AuthenticatedRequest,
 
     res.json({
       today,
+      hasAdmin: db.users.some((u) => u.role === 'admin'),
       myAttendanceToday,
       totalEmployees: db.users.filter((u) => EMPLOYEE_ROLES.includes(u.role)).length,
       employeesPresentToday,

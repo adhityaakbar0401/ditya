@@ -53,28 +53,29 @@ export default function AppShell() {
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-sm font-semibold transition-colors whitespace-nowrap ${
       isActive
-        ? 'bg-red-700 text-white'
+        ? 'bg-red-700 text-white border-l-4 border-amber-400 shadow-xs'
         : 'text-slate-700 hover:bg-red-50 hover:text-red-800'
     }`;
 
   const subLinkClass = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2.5 rounded-lg py-2 pl-10 pr-3 text-sm font-medium transition-colors whitespace-nowrap ${
       isActive
-        ? 'bg-red-50 text-red-800 font-semibold'
+        ? 'bg-amber-50 text-red-800 border-l-2 border-amber-500 font-semibold'
         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
     }`;
 
   const sidebarContent = (
     <div className="flex h-full flex-col bg-white border-r border-slate-200">
       {/* Brand Header */}
-      <div className="flex h-16 items-center justify-between border-b border-slate-200 bg-red-800 px-5 text-white shrink-0">
-        <div className="min-w-0">
+      <div className="flex h-16 items-center justify-between border-b-2 border-amber-400 bg-red-700 px-5 text-white shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-md shrink-0" />
           <p className="text-base font-extrabold tracking-tight truncate">SMK Prima Unggul</p>
         </div>
         <button
           type="button"
           onClick={() => setMobileMenuOpen(false)}
-          className="rounded-lg p-1.5 text-red-100 hover:bg-red-700 lg:hidden"
+          className="rounded-lg p-1.5 text-red-100 hover:bg-red-800 lg:hidden"
           aria-label="Tutup menu"
         >
           <X className="h-5 w-5" />
@@ -82,12 +83,16 @@ export default function AppShell() {
       </div>
 
       {/* User Identity Block */}
-      <div className="border-b border-slate-200 px-5 py-4 bg-slate-50/60">
+      <div className="border-b border-slate-200 px-5 py-4 bg-white">
         <p className="text-sm font-bold text-slate-900 truncate">{user.full_name}</p>
-        <p className="mt-0.5 text-xs font-medium text-red-700">
-          {formatRoleLabel(user.role)}
-          {user.jabatan ? ` · ${user.jabatan}` : ''}
-        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+            {formatRoleLabel(user.role)}
+          </span>
+          {user.jabatan && (
+            <span className="text-xs font-medium text-slate-600 truncate">{user.jabatan}</span>
+          )}
+        </div>
       </div>
 
       {/* Role-based Sidebar Navigation */}
@@ -232,14 +237,14 @@ export default function AppShell() {
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-100 lg:hidden"
+              className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:border-amber-300 hover:bg-amber-50 lg:hidden"
               aria-label="Buka menu navigasi"
             >
               <Menu className="h-5 w-5" />
             </button>
             <div className="flex items-center gap-2 text-sm min-w-0">
-              <span className="hidden sm:inline text-slate-400">Portal Absensi</span>
-              <span className="hidden sm:inline text-slate-300">/</span>
+              <span className="hidden sm:inline font-medium text-slate-500">Portal Absensi</span>
+              <span className="hidden sm:inline text-amber-500 font-bold">/</span>
               <h1 className="font-bold text-slate-950 truncate">{pageTitle}</h1>
             </div>
           </div>
@@ -247,12 +252,12 @@ export default function AppShell() {
           <div className="flex items-center gap-4 shrink-0">
             <div className="hidden sm:block text-right">
               <p className="text-xs font-semibold text-slate-900">{user.full_name}</p>
-              <p className="text-[11px] text-slate-500">{formatRoleLabel(user.role)}</p>
+              <p className="text-[11px] font-semibold text-amber-800">{formatRoleLabel(user.role)}</p>
             </div>
             <button
               type="button"
               onClick={handleLogout}
-              className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-800 hover:bg-red-700 hover:text-white hover:border-red-700 transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3.5 py-2 text-xs font-semibold text-red-800 hover:bg-red-700 hover:text-white hover:border-red-700 transition-colors whitespace-nowrap shrink-0"
             >
               <LogOut className="h-3.5 w-3.5 shrink-0" />
               <span>Logout</span>

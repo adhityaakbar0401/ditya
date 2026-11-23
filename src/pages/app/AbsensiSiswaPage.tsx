@@ -125,7 +125,7 @@ export default function AbsensiSiswaPage() {
   return (
     <div className="space-y-6">
       {/* Control Toolbar */}
-      <section className="rounded-xl border border-slate-200 bg-white p-6">
+      <section className="rounded-xl border border-slate-200 border-t-4 border-t-red-700 bg-white p-6">
         <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-center">
           <div>
             <h2 className="text-lg font-bold text-slate-950">Pencatatan Absensi Siswa</h2>
@@ -138,7 +138,7 @@ export default function AbsensiSiswaPage() {
               type="button"
               disabled={filteredStudents.length === 0 || saving}
               onClick={() => markAllFiltered('Hadir')}
-              className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:border-red-300 hover:text-red-700 transition-colors whitespace-nowrap"
+              className="rounded-lg border border-amber-400 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-950 hover:bg-amber-100 transition-colors whitespace-nowrap"
             >
               Tandai Semua Hadir
             </button>

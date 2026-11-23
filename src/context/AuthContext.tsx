@@ -20,6 +20,7 @@ interface AuthContextValue {
     email: string;
     password: string;
   }) => Promise<UserProfile>;
+  claimAdmin: () => Promise<UserProfile>;
   logout: () => void;
   refreshAuthStatus: () => Promise<void>;
 }
@@ -138,6 +139,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [refreshAuthStatus]
   );
 
+  const claimAdmin = useCallback(async () => {
+    const res = await apiRequest<{ user: UserProfile }>('/api/auth/claim-admin', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    setUser(res.user);
+    await refreshAuthStatus();
+    return res.user;
+  }, [refreshAuthStatus]);
+
   const logout = useCallback(() => {
     setStoredToken(null);
     setUser(null);
@@ -153,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         registerFirstAdmin,
         activateStudentAccount,
+        claimAdmin,
         logout,
         refreshAuthStatus,
       }}
