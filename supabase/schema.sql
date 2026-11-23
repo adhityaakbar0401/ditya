@@ -424,14 +424,31 @@ CREATE OR REPLACE FUNCTION public.activate_student_link(p_nis TEXT)
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, auth
 AS $$
 DECLARE
   v_uid UUID := auth.uid();
+  v_user auth.users%ROWTYPE;
   v_updated INT;
 BEGIN
   IF v_uid IS NULL THEN
     RETURN FALSE;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
+    SELECT * INTO v_user FROM auth.users WHERE id = v_uid;
+    IF FOUND THEN
+      INSERT INTO public.profiles (id, email, full_name, role, nip, jabatan)
+      VALUES (
+        v_user.id,
+        COALESCE(v_user.email, ''),
+        COALESCE(NULLIF(v_user.raw_user_meta_data->>'full_name', ''), split_part(COALESCE(v_user.email, 'Siswa'), '@', 1)),
+        'siswa',
+        COALESCE(v_user.raw_user_meta_data->>'nip', trim(p_nis)),
+        COALESCE(v_user.raw_user_meta_data->>'jabatan', 'Siswa')
+      )
+      ON CONFLICT (id) DO NOTHING;
+    END IF;
   END IF;
 
   UPDATE public.students
@@ -446,18 +463,104 @@ END;
 $$;
 GRANT EXECUTE ON FUNCTION public.activate_student_link(TEXT) TO authenticated;
 
--- Helper RPC untuk mengecek apakah sudah ada user terdaftar (aman terhadap RLS anon)
+-- Helper RPC untuk mengecek apakah sudah ada user terdaftar (memeriksa profiles maupun auth.users)
 CREATE OR REPLACE FUNCTION public.get_auth_bootstrap_status()
 RETURNS TABLE(has_users BOOLEAN, user_count INT)
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, auth
 AS $$
-  SELECT (COUNT(*) > 0) AS has_users, COUNT(*)::INT AS user_count
-  FROM public.profiles;
+  WITH counts AS (
+    SELECT
+      (SELECT COUNT(*)::INT FROM public.profiles) AS profile_count,
+      (SELECT COUNT(*)::INT FROM auth.users) AS auth_count
+  )
+  SELECT
+    (profile_count > 0 OR auth_count > 0) AS has_users,
+    GREATEST(profile_count, auth_count) AS user_count
+  FROM counts;
 $$;
 GRANT EXECUTE ON FUNCTION public.get_auth_bootstrap_status() TO anon, authenticated;
+
+-- Helper RPC untuk sinkronisasi otomatis profil user yang sedang login (termasuk jika user dibuat sebelum schema.sql dijalankan)
+CREATE OR REPLACE FUNCTION public.sync_my_profile()
+RETURNS SETOF public.profiles
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_user auth.users%ROWTYPE;
+  v_existing public.profiles%ROWTYPE;
+  v_count INT;
+  v_role TEXT;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT * INTO v_existing FROM public.profiles WHERE id = v_uid;
+  IF FOUND THEN
+    RETURN NEXT v_existing;
+    RETURN;
+  END IF;
+
+  SELECT * INTO v_user FROM auth.users WHERE id = v_uid;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+
+  SELECT COUNT(*) INTO v_count FROM public.profiles;
+  IF v_count = 0 THEN
+    v_role := 'admin';
+  ELSE
+    v_role := COALESCE(NULLIF(v_user.raw_user_meta_data->>'role', ''), 'tenaga_kependidikan');
+    IF v_role NOT IN ('admin', 'guru', 'tenaga_kependidikan', 'siswa') THEN
+      v_role := 'tenaga_kependidikan';
+    END IF;
+  END IF;
+
+  INSERT INTO public.profiles (id, email, full_name, role, nip, jabatan)
+  VALUES (
+    v_user.id,
+    COALESCE(v_user.email, ''),
+    COALESCE(NULLIF(v_user.raw_user_meta_data->>'full_name', ''), split_part(COALESCE(v_user.email, 'User'), '@', 1)),
+    v_role,
+    COALESCE(v_user.raw_user_meta_data->>'nip', ''),
+    COALESCE(v_user.raw_user_meta_data->>'jabatan', '')
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    updated_at = NOW()
+  RETURNING * INTO v_existing;
+
+  RETURN NEXT v_existing;
+  RETURN;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.sync_my_profile() TO authenticated;
+
+-- Backfill user yang sudah ada di auth.users sebelum trigger dibuat (user paling awal otomatis menjadi admin jika belum ada admin)
+INSERT INTO public.profiles (id, email, full_name, role, nip, jabatan)
+SELECT
+  u.id,
+  COALESCE(u.email, ''),
+  COALESCE(NULLIF(u.raw_user_meta_data->>'full_name', ''), split_part(COALESCE(u.email, 'User'), '@', 1)),
+  CASE
+    WHEN NOT EXISTS (SELECT 1 FROM public.profiles WHERE role = 'admin')
+      AND u.id = (SELECT id FROM auth.users ORDER BY created_at ASC LIMIT 1)
+    THEN 'admin'
+    WHEN (u.raw_user_meta_data->>'role') IN ('admin', 'guru', 'tenaga_kependidikan', 'siswa')
+    THEN (u.raw_user_meta_data->>'role')
+    ELSE 'tenaga_kependidikan'
+  END,
+  COALESCE(u.raw_user_meta_data->>'nip', ''),
+  COALESCE(u.raw_user_meta_data->>'jabatan', '')
+FROM auth.users u
+WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.id = u.id);
+
 
 
 

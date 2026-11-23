@@ -55,12 +55,12 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   }
 
   if (!res.ok) {
-    if (res.status === 404 && !data) {
+    if ((res.status === 404 || res.status >= 500) && !data) {
       if (isClientSupabaseConfigured) {
         return (await executeSupabaseFallback(path, options, token)) as T;
       }
       throw new Error(
-        `Endpoint server (${path}) tidak ditemukan (404). Jika menggunakan Vercel, pastikan file vercel.json + api/index.ts sudah di-deploy dan Environment Variables Supabase (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY) sudah ditambahkan lalu Redeploy.`
+        `Endpoint server (${path}) tidak merespons (${res.status}). Pastikan Environment Variables Supabase (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY) sudah ditambahkan di Vercel lalu Redeploy.`
       );
     }
     const errMsg =

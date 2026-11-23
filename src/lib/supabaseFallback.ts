@@ -81,6 +81,21 @@ async function resolveUserProfile(token: string): Promise<UserProfile | null> {
     };
   }
 
+  const rpcRes = await dbClient.rpc('sync_my_profile');
+  const syncedRow = Array.isArray(rpcRes.data) ? rpcRes.data[0] : rpcRes.data;
+  if (!rpcRes.error && syncedRow) {
+    const p = syncedRow as UserProfile;
+    return {
+      id: p.id,
+      email: p.email,
+      full_name: p.full_name,
+      role: p.role as UserRole,
+      nip: p.nip || '',
+      jabatan: p.jabatan || '',
+      created_at: p.created_at,
+    };
+  }
+
   const metaRole = authUser.user_metadata?.role as UserRole | undefined;
   return {
     id: authUser.id,
@@ -171,6 +186,9 @@ export async function executeSupabaseFallback(
     });
     if (signUpErr || !signUpData.user) {
       throw new Error(translateAuthError(signUpErr?.message));
+    }
+    if (Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+      throw new Error('Email tersebut sudah terdaftar di sistem autentikasi. Gunakan tab Masuk Portal.');
     }
     if (!signUpData.session) {
       throw new Error(
@@ -276,6 +294,9 @@ export async function executeSupabaseFallback(
     });
     if (signUpErr || !signUpData.user) {
       throw new Error(translateAuthError(signUpErr?.message));
+    }
+    if (Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+      throw new Error('Email tersebut sudah terdaftar di sistem autentikasi. Gunakan email lain atau Masuk Portal.');
     }
     if (!signUpData.session) {
       throw new Error(
@@ -425,6 +446,14 @@ export async function executeSupabaseFallback(
         .eq('date', today)
         .order('updated_at', { ascending: false }),
     ]);
+
+    const firstSchemaErr =
+      profilesCountRes.error || studentsCountRes.error || empAttRes.error || stuAttRes.error;
+    if (firstSchemaErr && firstSchemaErr.message.toLowerCase().includes('does not exist')) {
+      throw new Error(
+        'Tabel database Supabase belum dibuat. Jalankan file supabase/schema.sql di SQL Editor Supabase terlebih dahulu.'
+      );
+    }
 
     const empAttToday = (empAttRes.data || []) as Array<
       EmployeeAttendanceRecord & {
@@ -660,10 +689,11 @@ export async function executeSupabaseFallback(
     if (!cleanNis || !cleanNama || !cleanKelas) {
       throw new Error('NIS, Nama Siswa, dan Kelas wajib diisi.');
     }
-    if (cleanEmail || cleanPassword) {
-      throw new Error(
-        'Pembuatan akun login siswa langsung oleh Admin memerlukan backend API dengan SUPABASE_SERVICE_ROLE_KEY. Kosongkan Email/Kata Sandi saat menambah siswa, lalu siswa bisa aktivasi mandiri di halaman Login -> Aktivasi Akun Siswa.'
-      );
+    if ((cleanEmail && !cleanPassword) || (!cleanEmail && cleanPassword)) {
+      throw new Error('Untuk membuat akun login siswa, isi Email dan Kata Sandi sekaligus.');
+    }
+    if (cleanPassword && cleanPassword.length < 6) {
+      throw new Error('Kata sandi akun siswa minimal 6 karakter.');
     }
 
     let classId: string | null = null;
@@ -688,12 +718,44 @@ export async function executeSupabaseFallback(
       classId = createdClass?.id || null;
     }
 
+    let linkedUserId: string | null = null;
+    if (cleanEmail && cleanPassword) {
+      const { data: signUpData, error: signUpErr } = await supabaseClient.auth.signUp({
+        email: cleanEmail.toLowerCase(),
+        password: cleanPassword,
+        options: {
+          data: {
+            full_name: cleanNama,
+            role: 'siswa',
+            nip: cleanNis,
+            jabatan: `Siswa ${cleanKelas}`,
+          },
+        },
+      });
+      if (signUpErr || !signUpData.user) {
+        throw new Error(translateAuthError(signUpErr?.message));
+      }
+      if (Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+        throw new Error('Email siswa tersebut sudah terdaftar di Supabase Auth.');
+      }
+      linkedUserId = signUpData.user.id;
+      await dbClient.from('profiles').upsert({
+        id: linkedUserId,
+        email: cleanEmail.toLowerCase(),
+        full_name: cleanNama,
+        role: 'siswa',
+        nip: cleanNis,
+        jabatan: `Siswa ${cleanKelas}`,
+        created_at: signUpData.user.created_at,
+      });
+    }
+
     const { data, error } = await dbClient
       .from('students')
       .insert({
         nis: cleanNis,
         nama: cleanNama,
-        user_id: null,
+        user_id: linkedUserId,
         class_id: classId,
         kelas: cleanKelas,
         jurusan: cleanJurusan,
@@ -718,10 +780,59 @@ export async function executeSupabaseFallback(
     if (!cleanNis || !cleanNama || !cleanKelas) {
       throw new Error('NIS, Nama Siswa, dan Kelas wajib diisi.');
     }
-    if (cleanEmail || cleanPassword) {
+    if ((cleanEmail && !cleanPassword) || (!cleanEmail && cleanPassword)) {
+      throw new Error('Untuk membuat akun login siswa, isi Email dan Kata Sandi sekaligus.');
+    }
+    if (cleanPassword && cleanPassword.length < 6) {
+      throw new Error('Kata sandi akun siswa minimal 6 karakter.');
+    }
+
+    const { data: currentStudent } = await dbClient
+      .from('students')
+      .select('id, user_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!currentStudent) {
+      throw new Error('Siswa tidak ditemukan.');
+    }
+
+    let linkedUserId: string | null = currentStudent.user_id || null;
+    if (linkedUserId && (cleanEmail || cleanPassword)) {
       throw new Error(
-        'Pembaruan akun login siswa langsung oleh Admin membutuhkan backend API dengan SUPABASE_SERVICE_ROLE_KEY.'
+        'Pembaruan email/kata sandi akun siswa yang sudah aktif membutuhkan backend API dengan SUPABASE_SERVICE_ROLE_KEY.'
       );
+    }
+
+    if (!linkedUserId && cleanEmail && cleanPassword) {
+      const { data: signUpData, error: signUpErr } = await supabaseClient.auth.signUp({
+        email: cleanEmail.toLowerCase(),
+        password: cleanPassword,
+        options: {
+          data: {
+            full_name: cleanNama,
+            role: 'siswa',
+            nip: cleanNis,
+            jabatan: `Siswa ${cleanKelas}`,
+          },
+        },
+      });
+      if (signUpErr || !signUpData.user) {
+        throw new Error(translateAuthError(signUpErr?.message));
+      }
+      if (Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+        throw new Error('Email siswa tersebut sudah terdaftar di Supabase Auth.');
+      }
+      linkedUserId = signUpData.user.id;
+      await dbClient.from('profiles').upsert({
+        id: linkedUserId,
+        email: cleanEmail.toLowerCase(),
+        full_name: cleanNama,
+        role: 'siswa',
+        nip: cleanNis,
+        jabatan: `Siswa ${cleanKelas}`,
+        created_at: signUpData.user.created_at,
+      });
     }
 
     let classId: string | null = null;
@@ -750,6 +861,7 @@ export async function executeSupabaseFallback(
       .update({
         nis: cleanNis,
         nama: cleanNama,
+        user_id: linkedUserId,
         class_id: classId,
         kelas: cleanKelas,
         jurusan: cleanJurusan,
@@ -938,9 +1050,88 @@ export async function executeSupabaseFallback(
     return { users: data || [] };
   }
 
+  if (pathname === '/api/users' && method === 'POST') {
+    const email = String(body.email || '').trim().toLowerCase();
+    const password = String(body.password || '');
+    const full_name = String(body.full_name || '').trim();
+    const role = body.role as UserRole;
+    const nip = String(body.nip || '').trim();
+    const jabatan = String(body.jabatan || '').trim();
+
+    if (!email || !password || !full_name || !role) {
+      throw new Error('Nama, email, kata sandi, dan role wajib diisi.');
+    }
+    if (!VALID_ROLES.includes(role)) {
+      throw new Error('Role tidak valid.');
+    }
+    if (password.length < 6) {
+      throw new Error('Kata sandi minimal 6 karakter.');
+    }
+
+    const { data: signUpData, error: signUpErr } = await supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name, role, nip, jabatan },
+      },
+    });
+    if (signUpErr || !signUpData.user) {
+      throw new Error(translateAuthError(signUpErr?.message));
+    }
+    if (Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+      throw new Error('Email tersebut sudah terdaftar di Supabase Auth.');
+    }
+
+    const profile: UserProfile = {
+      id: signUpData.user.id,
+      email,
+      full_name,
+      role,
+      nip,
+      jabatan,
+      created_at: signUpData.user.created_at,
+    };
+    await dbClient.from('profiles').upsert(profile);
+
+    if (role === 'siswa' && nip) {
+      await dbClient.from('students').update({ user_id: signUpData.user.id }).ilike('nis', nip);
+    }
+    return { user: profile };
+  }
+
+  if (pathname.startsWith('/api/users/') && method === 'PATCH') {
+    const id = pathname.slice('/api/users/'.length);
+    const full_name = String(body.full_name || '').trim();
+    const role = body.role as UserRole;
+    const nip = String(body.nip || '').trim();
+    const jabatan = String(body.jabatan || '').trim();
+    const password = String(body.password || '').trim();
+
+    if (password) {
+      throw new Error(
+        'Pengubahan kata sandi user lain membutuhkan backend API dengan SUPABASE_SERVICE_ROLE_KEY. Kosongkan kata sandi jika hanya mengubah nama/role/jabatan.'
+      );
+    }
+
+    const { data: updatedProfile, error: profErr } = await dbClient
+      .from('profiles')
+      .update({
+        full_name,
+        role,
+        nip,
+        jabatan,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (profErr) throw new Error(profErr.message);
+    return { user: updatedProfile };
+  }
+
   if (pathname.startsWith('/api/users')) {
     throw new Error(
-      'Operasi tambah/edit/hard-delete user membutuhkan API backend aktif dengan SUPABASE_SERVICE_ROLE_KEY di Environment Variables Vercel.'
+      'Hard delete hingga Supabase Authentication membutuhkan backend API dengan SUPABASE_SERVICE_ROLE_KEY.'
     );
   }
 

@@ -158,38 +158,56 @@ export default function LoginPage() {
             </div>
           ) : (
             <>
-              {!isFirstSetup && (
-                <div className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1">
+              <div
+                className={`mb-6 grid gap-1 rounded-lg bg-slate-100 p-1 ${
+                  !authStatus || !authStatus.hasUsers ? 'grid-cols-3' : 'grid-cols-2'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setError('');
+                  }}
+                  className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
+                    mode === 'login'
+                      ? 'bg-white text-red-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Masuk Portal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('activate_student');
+                    setError('');
+                  }}
+                  className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
+                    mode === 'activate_student'
+                      ? 'bg-white text-red-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Aktivasi Siswa
+                </button>
+                {(!authStatus || !authStatus.hasUsers) && (
                   <button
                     type="button"
                     onClick={() => {
-                      setMode('login');
+                      setMode('first_admin');
                       setError('');
                     }}
                     className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
-                      mode === 'login'
+                      mode === 'first_admin'
                         ? 'bg-white text-red-700 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Masuk Portal
+                    Admin Pertama
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode('activate_student');
-                      setError('');
-                    }}
-                    className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors ${
-                      mode === 'activate_student'
-                        ? 'bg-white text-red-700 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Aktivasi Akun Siswa
-                  </button>
-                </div>
-              )}
+                )}
+              </div>
 
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-red-700">
@@ -236,7 +254,22 @@ export default function LoginPage() {
                   role="alert"
                   className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
                 >
-                  {error}
+                  <p>{error}</p>
+                  {isFirstSetup &&
+                    (error.toLowerCase().includes('terdaftar') ||
+                      error.toLowerCase().includes('sudah tersedia')) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (email) setIdentifier(email);
+                          setMode('login');
+                          setError('');
+                        }}
+                        className="mt-2 inline-flex items-center rounded-md bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-800"
+                      >
+                        Pindah ke Tab Masuk Portal
+                      </button>
+                    )}
                 </div>
               )}
 
